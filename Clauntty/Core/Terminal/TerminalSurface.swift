@@ -11,6 +11,9 @@ struct TerminalSurface: UIViewRepresentable {
     /// Callback for keyboard input - send this data to SSH
     var onTextInput: ((Data) -> Void)?
 
+    /// Callback when terminal grid size changes (rows, columns)
+    var onTerminalSizeChanged: ((UInt16, UInt16) -> Void)?
+
     /// Callback to provide SSH output writer to the view
     var onSurfaceReady: ((TerminalSurfaceView) -> Void)?
 
@@ -21,6 +24,7 @@ struct TerminalSurface: UIViewRepresentable {
         }
         let view = TerminalSurfaceView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), app: app)
         view.onTextInput = onTextInput
+        view.onTerminalSizeChanged = onTerminalSizeChanged
         onSurfaceReady?(view)
         return view
     }
@@ -28,6 +32,7 @@ struct TerminalSurface: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalSurfaceView, context: Context) {
         // Update callbacks if they changed
         uiView.onTextInput = onTextInput
+        uiView.onTerminalSizeChanged = onTerminalSizeChanged
     }
 
     func makeCoordinator() -> Coordinator {
@@ -45,7 +50,7 @@ struct TerminalSurface: UIViewRepresentable {
 
 /// UIKit view that hosts the Ghostty terminal
 /// Uses CAMetalLayer for GPU-accelerated rendering
-class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput {
+class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTraits {
 
     // MARK: - Published Properties
 
@@ -56,6 +61,24 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput {
     // MARK: - Ghostty Surface
 
     private(set) var surface: ghostty_surface_t?
+
+    // MARK: - Terminal Size
+
+    /// Current terminal grid size (rows, columns)
+    private(set) var terminalSize: (rows: UInt16, columns: UInt16) = (24, 80)
+
+    /// Callback when terminal grid size changes (for SSH window resize)
+    var onTerminalSizeChanged: ((UInt16, UInt16) -> Void)?
+
+    // MARK: - UITextInputTraits
+
+    var keyboardType: UIKeyboardType = .asciiCapable
+    var autocorrectionType: UITextAutocorrectionType = .no
+    var autocapitalizationType: UITextAutocapitalizationType = .none
+    var spellCheckingType: UITextSpellCheckingType = .no
+    var smartQuotesType: UITextSmartQuotesType = .no
+    var smartDashesType: UITextSmartDashesType = .no
+    var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
 
     // MARK: - SSH Data Flow
 
@@ -115,6 +138,193 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput {
 
         // Enable user interaction for keyboard
         isUserInteractionEnabled = true
+
+        // Add tap gesture for keyboard and paste menu
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        addGestureRecognizer(tapGesture)
+
+        // Add scroll gesture (one-finger drag to scroll terminal history)
+        let scrollGesture = UIPanGestureRecognizer(target: self, action: #selector(handleScroll(_:)))
+        scrollGesture.minimumNumberOfTouches = 1
+        scrollGesture.maximumNumberOfTouches = 1
+        addGestureRecognizer(scrollGesture)
+
+        // Add long press gesture for text selection
+        let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
+        longPressGesture.minimumPressDuration = 0.3
+        addGestureRecognizer(longPressGesture)
+
+        // Allow scroll and long press to work together
+        scrollGesture.require(toFail: longPressGesture)
+        tapGesture.require(toFail: longPressGesture)
+    }
+
+    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
+        let location = gesture.location(in: self)
+
+        // Clear any existing selection
+        clearSelection()
+
+        // Become first responder to show keyboard
+        if !isFirstResponder {
+            becomeFirstResponder()
+        }
+
+        // Show paste menu if clipboard has content
+        if UIPasteboard.general.hasStrings {
+            showEditMenu(at: location)
+        }
+    }
+
+    /// Clear the current selection by simulating a click
+    private func clearSelection() {
+        guard let surface = self.surface else { return }
+        // A click (press + release at same spot) clears selection
+        ghostty_surface_mouse_pos(surface, 0, 0, GHOSTTY_MODS_NONE)
+        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+    }
+
+    // MARK: - Selection & Copy/Paste
+
+    /// Track if we're in selection mode
+    private var isSelecting = false
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard let surface = self.surface else { return }
+
+        let location = gesture.location(in: self)
+
+        switch gesture.state {
+        case .began:
+            // Start selection with mouse press at location
+            isSelecting = true
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+
+        case .changed:
+            // Update selection as finger moves
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+
+        case .ended:
+            // End selection
+            ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            isSelecting = false
+
+            // Show edit menu if there's a selection
+            if ghostty_surface_has_selection(surface) {
+                showEditMenu(at: location)
+            }
+
+        case .cancelled:
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+            isSelecting = false
+
+        default:
+            break
+        }
+    }
+
+    private func showEditMenu(at location: CGPoint) {
+        // Use UIEditMenuInteraction (iOS 16+)
+        let menuConfig = UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
+        if let interaction = interactions.first(where: { $0 is UIEditMenuInteraction }) as? UIEditMenuInteraction {
+            interaction.presentEditMenu(with: menuConfig)
+        } else {
+            let editInteraction = UIEditMenuInteraction(delegate: self)
+            addInteraction(editInteraction)
+            editInteraction.presentEditMenu(with: menuConfig)
+        }
+    }
+
+    // MARK: - UIResponder Copy/Paste
+
+    override var canBecomeFirstResponder: Bool {
+        return true
+    }
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(copy(_:)) {
+            return surface != nil && ghostty_surface_has_selection(surface!)
+        }
+        if action == #selector(paste(_:)) {
+            return UIPasteboard.general.hasStrings
+        }
+        if action == #selector(selectAll(_:)) {
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    @objc override func copy(_ sender: Any?) {
+        guard let surface = self.surface else { return }
+
+        var text = ghostty_text_s()
+        if ghostty_surface_read_selection(surface, &text) {
+            if let ptr = text.text, text.text_len > 0 {
+                let string = String(cString: ptr)
+                UIPasteboard.general.string = string
+                Logger.clauntty.info("Copied \(text.text_len) characters to clipboard")
+            }
+            ghostty_surface_free_text(surface, &text)
+        }
+
+        // Clear selection after copying
+        clearSelection()
+    }
+
+    @objc override func paste(_ sender: Any?) {
+        guard let string = UIPasteboard.general.string else { return }
+        if let data = string.data(using: .utf8) {
+            onTextInput?(data)
+            Logger.clauntty.info("Pasted \(data.count) bytes from clipboard")
+        }
+    }
+
+    @objc override func selectAll(_ sender: Any?) {
+        // TODO: Implement select all if Ghostty supports it
+        Logger.clauntty.debug("Select all not yet implemented")
+    }
+
+    // MARK: - Scroll Handling
+
+    /// Accumulated scroll delta for smoother scrolling
+    private var scrollAccumulator: CGFloat = 0
+    private let scrollThreshold: CGFloat = 10.0  // Points per "line" of scroll
+
+    @objc private func handleScroll(_ gesture: UIPanGestureRecognizer) {
+        guard let surface = self.surface else { return }
+
+        let translation = gesture.translation(in: self)
+
+        switch gesture.state {
+        case .began:
+            scrollAccumulator = 0
+
+        case .changed:
+            // Accumulate vertical scroll (negative = scroll up to see history)
+            scrollAccumulator += translation.y
+
+            // Convert to scroll "lines" - Ghostty expects scroll delta in lines
+            // Positive y in gesture = finger moving down = scroll up in history
+            let scrollLines = scrollAccumulator / scrollThreshold
+
+            if abs(scrollLines) >= 1 {
+                // Send scroll to Ghostty (y positive = scroll up/back in history)
+                ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
+                scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
+            }
+
+            // Reset translation for incremental tracking
+            gesture.setTranslation(.zero, in: self)
+
+        case .ended, .cancelled:
+            scrollAccumulator = 0
+
+        default:
+            break
+        }
     }
 
     // MARK: - Layer
@@ -180,15 +390,21 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput {
         if let sublayer = ghosttySublayer {
             sublayer.frame = CGRect(origin: .zero, size: size)
             sublayer.contentsScale = scale
-            print("[Clauntty] sizeDidChange: sublayer frame=\(sublayer.frame), contentsScale=\(sublayer.contentsScale)")
+        }
+
+        // Query terminal grid size and notify if changed
+        let surfaceSize = ghostty_surface_size(surface)
+        let newRows = surfaceSize.rows
+        let newCols = surfaceSize.columns
+
+        if newRows != terminalSize.rows || newCols != terminalSize.columns {
+            terminalSize = (newRows, newCols)
+            print("[Clauntty] Terminal grid size changed: \(newCols)x\(newRows)")
+            onTerminalSizeChanged?(newRows, newCols)
         }
     }
 
     // MARK: - Focus
-
-    override var canBecomeFirstResponder: Bool {
-        return true
-    }
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
@@ -247,15 +463,6 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput {
         let backspace = Data([0x7F])  // DEL character
         Logger.clauntty.debug("Keyboard input: backspace")
         onTextInput?(backspace)
-    }
-
-    // MARK: - Touch Handling
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // Become first responder to show keyboard
-        if !isFirstResponder {
-            becomeFirstResponder()
-        }
     }
 
     // MARK: - Hardware Keyboard Support
@@ -337,6 +544,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput {
             }
             return nil
         }
+    }
+}
+
+// MARK: - UIEditMenuInteractionDelegate
+
+extension TerminalSurfaceView: UIEditMenuInteractionDelegate {
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
+        // Return default menu with Copy/Paste
+        return UIMenu(children: suggestedActions)
     }
 }
 

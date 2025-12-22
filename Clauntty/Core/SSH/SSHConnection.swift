@@ -173,6 +173,27 @@ class SSHConnection: ObservableObject {
         channelHandler?.sendToRemote(data)
     }
 
+    /// Send terminal window size change to SSH server
+    func sendWindowChange(rows: UInt16, columns: UInt16) {
+        guard let childChannel = sshChildChannel else {
+            Logger.clauntty.warning("Cannot send window change: no SSH channel")
+            return
+        }
+
+        let windowChange = SSHChannelRequestEvent.WindowChangeRequest(
+            terminalCharacterWidth: Int(columns),
+            terminalRowHeight: Int(rows),
+            terminalPixelWidth: 0,
+            terminalPixelHeight: 0
+        )
+
+        // Must execute on event loop
+        childChannel.eventLoop.execute {
+            childChannel.triggerUserOutboundEvent(windowChange, promise: nil)
+            Logger.clauntty.info("SSH window change sent: \(columns)x\(rows)")
+        }
+    }
+
     func disconnect() {
         Logger.clauntty.info("SSH disconnecting")
         channel?.close(mode: .all, promise: nil)

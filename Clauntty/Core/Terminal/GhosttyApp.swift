@@ -69,6 +69,10 @@ class GhosttyApp: ObservableObject {
         }
 
         self.app = app
+
+        // Set dark color scheme for proper terminal colors
+        ghostty_app_set_color_scheme(app, GHOSTTY_COLOR_SCHEME_DARK)
+
         self.readiness = .ready
         Logger.clauntty.info("GhosttyApp initialized successfully")
     }

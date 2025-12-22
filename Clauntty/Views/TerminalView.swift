@@ -49,6 +49,10 @@ struct TerminalView: View {
                         // Send keyboard input to SSH
                         appState.sshConnection?.sendData(data)
                     },
+                    onTerminalSizeChanged: { rows, columns in
+                        // Send window size change to SSH server
+                        appState.sshConnection?.sendWindowChange(rows: rows, columns: columns)
+                    },
                     onSurfaceReady: { surface in
                         self.terminalSurface = surface
                         connectSSH(surface: surface)
