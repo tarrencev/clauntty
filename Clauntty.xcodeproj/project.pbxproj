@@ -1,0 +1,655 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
+		7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */; };
+		D1000001 /* GhosttyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* GhosttyAppTests.swift */; };
+		D1000002 /* TerminalSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000002 /* TerminalSurfaceTests.swift */; };
+		8D50D6A34930F5200F1440E2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7856CABCC7D9170DD7EF307F /* Foundation.framework */; };
+		C0000001 /* ClaunttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000001 /* ClaunttyApp.swift */; };
+		C0000002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000002 /* ContentView.swift */; };
+		C0000003 /* SavedConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000003 /* SavedConnection.swift */; };
+		C0000004 /* ConnectionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000004 /* ConnectionStore.swift */; };
+		C0000005 /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000005 /* KeychainHelper.swift */; };
+		C0000006 /* ConnectionListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000006 /* ConnectionListView.swift */; };
+		C0000007 /* NewConnectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000007 /* NewConnectionView.swift */; };
+		C0000008 /* TerminalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000008 /* TerminalView.swift */; };
+		C0000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1000009 /* Assets.xcassets */; };
+		C0000010 /* GhosttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000010 /* GhosttyApp.swift */; };
+		C0000011 /* GhosttyBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000011 /* GhosttyBridge.swift */; };
+		C0000012 /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000012 /* TerminalSurface.swift */; };
+		C0000013 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000013 /* SSHConnection.swift */; };
+		C0000014 /* SSHAuthenticator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000014 /* SSHAuthenticator.swift */; };
+		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
+		C0000021 /* GhosttyKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		657335229B112DD454B8C404 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = C6000000 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = C4000000;
+			remoteInfo = Clauntty;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		C4000003 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				C0000021 /* GhosttyKit.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
+		D2000001 /* GhosttyAppTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyAppTests.swift; path = ../Tests/ClaunttyTests/GhosttyAppTests.swift; sourceTree = "<group>"; };
+		D2000002 /* TerminalSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalSurfaceTests.swift; path = ../Tests/ClaunttyTests/TerminalSurfaceTests.swift; sourceTree = "<group>"; };
+		7856CABCC7D9170DD7EF307F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyBridgeTests.swift; path = ../Tests/ClaunttyTests/GhosttyBridgeTests.swift; sourceTree = "<group>"; };
+		C1000000 /* Clauntty.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clauntty.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1000001 /* ClaunttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaunttyApp.swift; sourceTree = "<group>"; };
+		C1000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		C1000003 /* SavedConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedConnection.swift; sourceTree = "<group>"; };
+		C1000004 /* ConnectionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStore.swift; sourceTree = "<group>"; };
+		C1000005 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		C1000006 /* ConnectionListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionListView.swift; sourceTree = "<group>"; };
+		C1000007 /* NewConnectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewConnectionView.swift; sourceTree = "<group>"; };
+		C1000008 /* TerminalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalView.swift; sourceTree = "<group>"; };
+		C1000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C1000010 /* GhosttyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyApp.swift; sourceTree = "<group>"; };
+		C1000011 /* GhosttyBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GhosttyBridge.swift; sourceTree = "<group>"; };
+		C1000012 /* TerminalSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurface.swift; sourceTree = "<group>"; };
+		C1000013 /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
+		C1000014 /* SSHAuthenticator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthenticator.swift; sourceTree = "<group>"; };
+		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		80FD28A94163F02E770CF2EA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8D50D6A34930F5200F1440E2 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C2000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0000020 /* GhosttyKit.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		9288A4E4FA9722C67B531048 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				7856CABCC7D9170DD7EF307F /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		A84AE8FF78CCA176F9D311DF /* ClaunttyTests */ = {
+			isa = PBXGroup;
+			children = (
+				A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */,
+				023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */,
+				D2000001 /* GhosttyAppTests.swift */,
+				D2000002 /* TerminalSurfaceTests.swift */,
+			);
+			name = ClaunttyTests;
+			path = ClaunttyTests;
+			sourceTree = "<group>";
+		};
+		C3000000 = {
+			isa = PBXGroup;
+			children = (
+				C3000001 /* Clauntty */,
+				C3000010 /* Frameworks */,
+				C3000011 /* Products */,
+				A84AE8FF78CCA176F9D311DF /* ClaunttyTests */,
+			);
+			sourceTree = "<group>";
+		};
+		C3000001 /* Clauntty */ = {
+			isa = PBXGroup;
+			children = (
+				C1000001 /* ClaunttyApp.swift */,
+				C1000002 /* ContentView.swift */,
+				C3000002 /* Core */,
+				C3000006 /* Views */,
+				C3000007 /* Models */,
+				C3000008 /* Resources */,
+			);
+			path = Clauntty;
+			sourceTree = "<group>";
+		};
+		C3000002 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				C3000003 /* SSH */,
+				C3000004 /* Terminal */,
+				C3000005 /* Storage */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		C3000003 /* SSH */ = {
+			isa = PBXGroup;
+			children = (
+				C1000013 /* SSHConnection.swift */,
+				C1000014 /* SSHAuthenticator.swift */,
+			);
+			path = SSH;
+			sourceTree = "<group>";
+		};
+		C3000004 /* Terminal */ = {
+			isa = PBXGroup;
+			children = (
+				C1000010 /* GhosttyApp.swift */,
+				C1000011 /* GhosttyBridge.swift */,
+				C1000012 /* TerminalSurface.swift */,
+			);
+			path = Terminal;
+			sourceTree = "<group>";
+		};
+		C3000005 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				C1000004 /* ConnectionStore.swift */,
+				C1000005 /* KeychainHelper.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		C3000006 /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				C1000006 /* ConnectionListView.swift */,
+				C1000007 /* NewConnectionView.swift */,
+				C1000008 /* TerminalView.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		C3000007 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				C1000003 /* SavedConnection.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C3000008 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				C1000009 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		C3000010 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				C1000020 /* GhosttyKit.xcframework */,
+				9288A4E4FA9722C67B531048 /* iOS */,
+			);
+			path = Frameworks;
+			sourceTree = "<group>";
+		};
+		C3000011 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C1000000 /* Clauntty.app */,
+				82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C4000000 /* Clauntty */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C5000002 /* Build configuration list for PBXNativeTarget "Clauntty" */;
+			buildPhases = (
+				C4000001 /* Sources */,
+				C2000001 /* Frameworks */,
+				C4000002 /* Resources */,
+				C4000003 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Clauntty;
+			packageProductDependencies = (
+				C8000000 /* NIOCore */,
+				C8000001 /* NIOPosix */,
+				C8000002 /* NIOSSH */,
+			);
+			productName = Clauntty;
+			productReference = C1000000 /* Clauntty.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F89F13520E55AD53582AEAF8 /* ClaunttyTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0DA34F2E5592F4C621A1D90 /* Build configuration list for PBXNativeTarget "ClaunttyTests" */;
+			buildPhases = (
+				3DF9E68D60B692AF33278D58 /* Sources */,
+				80FD28A94163F02E770CF2EA /* Frameworks */,
+				B8C6E0D1AD147D4A18697E81 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C42CEF7E6CFE2956B0081106 /* PBXTargetDependency */,
+			);
+			name = ClaunttyTests;
+			productName = ClaunttyTests;
+			productReference = 82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C6000000 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					C4000000 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+				};
+			};
+			buildConfigurationList = C5000000 /* Build configuration list for PBXProject "Clauntty" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C3000000;
+			packageReferences = (
+				C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
+				C7000001 /* XCRemoteSwiftPackageReference "swift-nio" */,
+			);
+			productRefGroup = C3000011 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C4000000 /* Clauntty */,
+				F89F13520E55AD53582AEAF8 /* ClaunttyTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B8C6E0D1AD147D4A18697E81 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C4000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0000009 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3DF9E68D60B692AF33278D58 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */,
+				7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */,
+				D1000001 /* GhosttyAppTests.swift in Sources */,
+				D1000002 /* TerminalSurfaceTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C4000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C0000001 /* ClaunttyApp.swift in Sources */,
+				C0000002 /* ContentView.swift in Sources */,
+				C0000003 /* SavedConnection.swift in Sources */,
+				C0000004 /* ConnectionStore.swift in Sources */,
+				C0000005 /* KeychainHelper.swift in Sources */,
+				C0000006 /* ConnectionListView.swift in Sources */,
+				C0000007 /* NewConnectionView.swift in Sources */,
+				C0000008 /* TerminalView.swift in Sources */,
+				C0000010 /* GhosttyApp.swift in Sources */,
+				C0000011 /* GhosttyBridge.swift in Sources */,
+				C0000012 /* TerminalSurface.swift in Sources */,
+				C0000013 /* SSHConnection.swift in Sources */,
+				C0000014 /* SSHAuthenticator.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C42CEF7E6CFE2956B0081106 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = Clauntty;
+			target = C4000000 /* Clauntty */;
+			targetProxy = 657335229B112DD454B8C404 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		715E4D3D21E4A4F64997B737 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app.tests;
+				PRODUCT_NAME = ClaunttyTests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Clauntty.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Clauntty";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		A3C135922CDA28AC036C4A71 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app.tests;
+				PRODUCT_NAME = ClaunttyTests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Clauntty.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Clauntty";
+			};
+			name = Debug;
+		};
+		C5000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		C5000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C5000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Clauntty;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C5000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Clauntty;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C5000000 /* Build configuration list for PBXProject "Clauntty" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C5000003 /* Debug */,
+				C5000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C5000002 /* Build configuration list for PBXNativeTarget "Clauntty" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C5000005 /* Debug */,
+				C5000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0DA34F2E5592F4C621A1D90 /* Build configuration list for PBXNativeTarget "ClaunttyTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				715E4D3D21E4A4F64997B737 /* Release */,
+				A3C135922CDA28AC036C4A71 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-ssh.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
+		C7000001 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.62.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C8000000 /* NIOCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C7000001 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOCore;
+		};
+		C8000001 /* NIOPosix */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C7000001 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOPosix;
+		};
+		C8000002 /* NIOSSH */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
+			productName = NIOSSH;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = C6000000 /* Project object */;
+}
