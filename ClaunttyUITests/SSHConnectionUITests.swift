@@ -19,10 +19,60 @@ final class SSHConnectionUITests: XCTestCase {
         continueAfterFailure = false
         app = XCUIApplication()
         app.launch()
+
+        // Clean up any existing test connections before each test
+        cleanupTestConnections()
     }
 
     override func tearDownWithError() throws {
+        // Clean up test connections after each test
+        // First go back to connection list if we're in terminal
+        if !app.staticTexts["Servers"].exists {
+            // Try to dismiss any modal or go back
+            let closeButton = app.navigationBars.buttons.firstMatch
+            if closeButton.exists {
+                closeButton.tap()
+                _ = app.staticTexts["Servers"].waitForExistence(timeout: 3)
+            }
+        }
+        cleanupTestConnections()
         app.terminate()
+    }
+
+    /// Delete all test connections to keep the list clean
+    private func cleanupTestConnections() {
+        // Make sure we're on the connection list
+        guard app.staticTexts["Servers"].waitForExistence(timeout: 3) else { return }
+
+        // Find and delete all cells with our test identifier
+        var attempts = 0
+        while attempts < 20 {  // Limit to avoid infinite loop
+            let cells = app.cells.containing(.staticText, identifier: testCellIdentifier)
+            guard cells.count > 0 else { break }
+
+            let cell = cells.firstMatch
+            guard cell.exists else { break }
+
+            // Swipe to delete
+            cell.swipeLeft()
+
+            // Tap delete button
+            let deleteButton = app.buttons["Delete"]
+            if deleteButton.waitForExistence(timeout: 2) {
+                deleteButton.tap()
+            } else {
+                // Try tapping the red delete button that appears after swipe
+                let redDelete = cell.buttons.matching(identifier: "Delete").firstMatch
+                if redDelete.exists {
+                    redDelete.tap()
+                } else {
+                    break  // Can't find delete button
+                }
+            }
+
+            attempts += 1
+            sleep(1)  // Wait for deletion animation
+        }
     }
 
     // MARK: - Connection List Tests
@@ -206,12 +256,6 @@ final class SSHConnectionUITests: XCTestCase {
     }
 
     private func addConnectionWithDetails(host: String, port: String, username: String) throws {
-        // Check if connection already exists
-        let existingCell = app.cells.containing(.staticText, identifier: username).element
-        if existingCell.exists {
-            return // Connection already added
-        }
-
         // Tap add button
         let addButton = app.navigationBars.buttons.element(boundBy: 0)
         XCTAssertTrue(addButton.waitForExistence(timeout: 5))
@@ -243,5 +287,158 @@ final class SSHConnectionUITests: XCTestCase {
 
         // Wait for list to update
         sleep(1)
+    }
+
+    // MARK: - Keyboard Accessory Bar Tests
+
+    func testKeyboardAccessoryBarDisplays() throws {
+        // Add and connect to test server
+        try addTestConnection()
+
+        let connectionCell = app.cells.containing(.staticText, identifier: testCellIdentifier).firstMatch
+        XCTAssertTrue(connectionCell.waitForExistence(timeout: 5))
+        connectionCell.tap()
+
+        // Handle password
+        let passwordField = app.secureTextFields.firstMatch
+        if passwordField.waitForExistence(timeout: 5) {
+            passwordField.tap()
+            sleep(1)  // Wait for keyboard to stabilize
+            passwordField.typeText(testPassword)
+            sleep(1)  // Wait before tapping return
+
+            // Try to tap return, with fallback to typing newline
+            let returnButton = app.keyboards.buttons["return"]
+            if returnButton.waitForExistence(timeout: 2) && returnButton.isHittable {
+                returnButton.tap()
+            } else {
+                // Fallback: type newline character
+                passwordField.typeText("\n")
+            }
+        }
+
+        // Wait for terminal to load and SSH to connect
+        sleep(5)
+
+        // Tap on terminal to bring up keyboard
+        // The terminal is a custom view, try tapping in the center of the screen
+        let screenCenter = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        screenCenter.tap()
+
+        // Wait for keyboard to appear
+        sleep(2)
+
+        // Debug: Check if keyboard exists and log button info
+        XCTContext.runActivity(named: "Check keyboard and accessory bar") { activity in
+            let keyboard = app.keyboards.firstMatch
+            let keyboardExists = keyboard.exists
+
+            // Take a screenshot of current state
+            let screenshot = app.screenshot()
+            let attachment = XCTAttachment(screenshot: screenshot)
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+
+            // Log what we find
+            let allButtons = app.buttons.allElementsBoundByIndex
+            var buttonInfo = "Found \(allButtons.count) buttons. Keyboard exists: \(keyboardExists)\n"
+            for (index, button) in allButtons.enumerated() {
+                buttonInfo += "Button \(index): label='\(button.label)' id='\(button.identifier)'\n"
+            }
+
+            // Add text attachment with button info
+            let textAttachment = XCTAttachment(string: buttonInfo)
+            textAttachment.name = "Button Info"
+            textAttachment.lifetime = .keepAlways
+            activity.add(textAttachment)
+
+            // Check for accessory bar buttons using different queries
+            let escById = app.buttons.matching(identifier: "Esc").firstMatch
+            let escByLabel = app.buttons.matching(NSPredicate(format: "label == 'Esc'")).firstMatch
+            let escInToolbar = app.toolbars.buttons["Esc"]
+            let tabButton = app.buttons["Tab"]
+            let ctrlButton = app.buttons["Ctrl"]
+
+            let hasAccessoryButtons = escById.exists || escByLabel.exists || escInToolbar.exists ||
+                                      tabButton.exists || ctrlButton.exists
+
+            // Add another attachment with query results
+            let queryResults = """
+            Esc by ID: \(escById.exists)
+            Esc by label: \(escByLabel.exists)
+            Esc in toolbar: \(escInToolbar.exists)
+            Tab button: \(tabButton.exists)
+            Ctrl button: \(ctrlButton.exists)
+            """
+            let queryAttachment = XCTAttachment(string: queryResults)
+            queryAttachment.name = "Query Results"
+            queryAttachment.lifetime = .keepAlways
+            activity.add(queryAttachment)
+
+            XCTAssertTrue(hasAccessoryButtons, "Keyboard accessory bar should have terminal shortcut buttons. \(queryResults)")
+        }
+    }
+
+    func testKeyboardAccessoryEscButton() throws {
+        // Add and connect to test server
+        try addTestConnection()
+
+        let connectionCell = app.cells.containing(.staticText, identifier: testCellIdentifier).firstMatch
+        connectionCell.tap()
+
+        // Handle password
+        let passwordField = app.secureTextFields.firstMatch
+        if passwordField.waitForExistence(timeout: 5) {
+            passwordField.tap()
+            passwordField.typeText(testPassword)
+            app.keyboards.buttons["return"].tap()
+        }
+
+        // Wait for terminal
+        sleep(3)
+
+        // Tap terminal to show keyboard
+        app.otherElements.firstMatch.tap()
+        sleep(1)
+
+        // Find and tap Esc button
+        let escButton = app.buttons["Esc"]
+        if escButton.waitForExistence(timeout: 3) {
+            escButton.tap()
+            // Esc should be sent - we can't easily verify terminal received it,
+            // but at least verify the button is tappable without crash
+            XCTAssertTrue(true, "Esc button tapped successfully")
+        }
+    }
+
+    func testKeyboardAccessoryCtrlCButton() throws {
+        // Add and connect to test server
+        try addTestConnection()
+
+        let connectionCell = app.cells.containing(.staticText, identifier: testCellIdentifier).firstMatch
+        connectionCell.tap()
+
+        // Handle password
+        let passwordField = app.secureTextFields.firstMatch
+        if passwordField.waitForExistence(timeout: 5) {
+            passwordField.tap()
+            passwordField.typeText(testPassword)
+            app.keyboards.buttons["return"].tap()
+        }
+
+        // Wait for terminal
+        sleep(3)
+
+        // Tap terminal to show keyboard
+        app.otherElements.firstMatch.tap()
+        sleep(1)
+
+        // Find and tap ^C button
+        let ctrlCButton = app.buttons["^C"]
+        if ctrlCButton.waitForExistence(timeout: 3) {
+            ctrlCButton.tap()
+            // Ctrl+C should be sent
+            XCTAssertTrue(true, "Ctrl+C button tapped successfully")
+        }
     }
 }

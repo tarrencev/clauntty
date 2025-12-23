@@ -83,7 +83,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     // MARK: - SSH Data Flow
 
     /// Callback for keyboard input - send this data to SSH
-    var onTextInput: ((Data) -> Void)?
+    var onTextInput: ((Data) -> Void)? {
+        didSet {
+            // Also wire up the accessory bar
+            accessoryBar.onKeyInput = onTextInput
+        }
+    }
+
+    /// Keyboard accessory bar with terminal keys
+    private let accessoryBar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 48))
+
+    override var inputAccessoryView: UIView? {
+        return accessoryBar
+    }
 
     // MARK: - Initialization
 
@@ -165,15 +177,44 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Clear any existing selection
         clearSelection()
 
+        // If edit menu is visible, dismiss it and don't show a new one
+        if isEditMenuVisible {
+            dismissEditMenu()
+            return
+        }
+
         // Become first responder to show keyboard
         if !isFirstResponder {
             becomeFirstResponder()
         }
 
-        // Show paste menu if clipboard has content
-        if UIPasteboard.general.hasStrings {
+        // Only show paste menu if tapping near the cursor and clipboard has content
+        if isNearCursor(location) && UIPasteboard.general.hasStrings {
             showEditMenu(at: location)
         }
+    }
+
+    /// Check if a point is near the cursor position
+    private func isNearCursor(_ point: CGPoint) -> Bool {
+        guard let surface = self.surface else { return false }
+
+        // Get cursor position from Ghostty (IME point = cursor location)
+        var x: Double = 0
+        var y: Double = 0
+        var width: Double = 0
+        var height: Double = 0
+        ghostty_surface_ime_point(surface, &x, &y, &width, &height)
+
+        // Define a hit area around the cursor (generous for touch)
+        let hitRadius: CGFloat = 50.0
+        let cursorRect = CGRect(
+            x: CGFloat(x) - hitRadius,
+            y: CGFloat(y) - hitRadius,
+            width: CGFloat(width) + hitRadius * 2,
+            height: CGFloat(height) + hitRadius * 2
+        )
+
+        return cursorRect.contains(point)
     }
 
     /// Clear the current selection by simulating a click
@@ -189,6 +230,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Track if we're in selection mode
     private var isSelecting = false
+
+    /// Track if edit menu is currently visible
+    private var isEditMenuVisible = false
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard let surface = self.surface else { return }
@@ -236,6 +280,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             addInteraction(editInteraction)
             editInteraction.presentEditMenu(with: menuConfig)
         }
+        isEditMenuVisible = true
+    }
+
+    private func dismissEditMenu() {
+        if let interaction = interactions.first(where: { $0 is UIEditMenuInteraction }) as? UIEditMenuInteraction {
+            interaction.dismissMenu()
+        }
+        isEditMenuVisible = false
     }
 
     // MARK: - UIResponder Copy/Paste
@@ -553,6 +605,12 @@ extension TerminalSurfaceView: UIEditMenuInteractionDelegate {
     func editMenuInteraction(_ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration, suggestedActions: [UIMenuElement]) -> UIMenu? {
         // Return default menu with Copy/Paste
         return UIMenu(children: suggestedActions)
+    }
+
+    func editMenuInteraction(_ interaction: UIEditMenuInteraction, willDismissMenuFor configuration: UIEditMenuConfiguration, animator: any UIEditMenuInteractionAnimating) {
+        animator.addCompletion {
+            self.isEditMenuVisible = false
+        }
     }
 }
 

@@ -21,3 +21,9 @@ Package.resolved
 .env*
 credentials*
 secrets*
+
+# Test artifacts
+screenshots/
+
+# IDB temp files
+/tmp/idb_companion.log

@@ -48,6 +48,19 @@ class ConnectionStore: ObservableObject {
         update(updated)
     }
 
+    /// Check if a connection with the same host, port, username, and name already exists
+    /// Returns the existing connection if found, nil otherwise
+    /// Excludes the connection with the given ID (for editing)
+    func findDuplicate(of connection: SavedConnection, excludingId: UUID? = nil) -> SavedConnection? {
+        return connections.first { existing in
+            existing.id != excludingId &&
+            existing.host.lowercased() == connection.host.lowercased() &&
+            existing.port == connection.port &&
+            existing.username == connection.username &&
+            existing.name.lowercased() == connection.name.lowercased()
+        }
+    }
+
     // MARK: - Persistence
 
     private func save() {

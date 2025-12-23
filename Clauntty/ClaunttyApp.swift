@@ -20,24 +20,52 @@ enum GhosttyGlobal {
     }
 }
 
+/// Preview modes for testing different UI states
+enum PreviewMode: String {
+    case none
+    case terminal = "--preview-terminal"        // Show terminal view
+    case terminalKeyboard = "--preview-keyboard" // Terminal with keyboard visible
+    case connectionList = "--preview-connections" // Connection list
+    case newConnection = "--preview-new-connection" // New connection form
+
+    static func fromArgs() -> PreviewMode {
+        for mode in [terminal, terminalKeyboard, connectionList, newConnection] {
+            if CommandLine.arguments.contains(mode.rawValue) {
+                return mode
+            }
+        }
+        // Legacy support
+        if CommandLine.arguments.contains("--test-terminal") {
+            return .terminal
+        }
+        return .none
+    }
+}
+
 @main
 struct ClaunttyApp: App {
     @StateObject private var connectionStore = ConnectionStore()
     @StateObject private var appState: AppState
     @StateObject private var ghosttyApp: GhosttyApp
 
+    static let previewMode = PreviewMode.fromArgs()
+
     init() {
         // Initialize GhosttyKit BEFORE creating GhosttyApp
         GhosttyGlobal.initialize()
         _ghosttyApp = StateObject(wrappedValue: GhosttyApp())
 
-        // Check for test mode launch argument
-        let testTerminal = CommandLine.arguments.contains("--test-terminal")
         let initialState = AppState()
-        if testTerminal {
+
+        // Configure state based on preview mode
+        switch Self.previewMode {
+        case .terminal, .terminalKeyboard:
             initialState.connectionStatus = .connected
-            Logger.clauntty.info("Test mode: auto-navigating to terminal view")
+            Logger.clauntty.info("Preview mode: \(Self.previewMode.rawValue)")
+        case .connectionList, .newConnection, .none:
+            break
         }
+
         _appState = StateObject(wrappedValue: initialState)
     }
 

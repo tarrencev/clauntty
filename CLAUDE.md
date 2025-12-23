@@ -111,11 +111,20 @@ The `ghostty_surface_write_pty_output` function feeds data directly to the termi
 - SSH connection wiring ✓
 - Keyboard input → SSH ✓
 - SSH output → Terminal display ✓
+- SSH password authentication ✓
+- SSH Ed25519 key authentication ✓
+- Keyboard accessory bar (Esc, Tab, Ctrl, arrow nipple, ^C, ^L, ^D) ✓
+- Paste menu near cursor ✓
+- Terminal resize → SSH window change ✓
+- Scrollback history (one-finger scroll) ✓
+- Text selection + copy (long press to select) ✓
+- Connection editing (swipe left → Edit) ✓
+- Duplicate connection detection ✓
 
 **TODO:**
-- [ ] Test SSH connection end-to-end
-- [ ] Handle SSH key authentication
-- [ ] Terminal resize events → SSH window change
+- [ ] RSA/ECDSA key support
+- [ ] Host key verification
+- [ ] Multiple sessions/tabs
 
 ## iOS Fixes Applied
 
@@ -215,3 +224,65 @@ Spin up an isolated SSH server for safe testing:
 Enable on Mac: System Settings > General > Sharing > Remote Login
 
 In simulator, connect to `localhost:22` with your Mac username.
+
+## Simulator Automation (IDB)
+
+Facebook IDB allows automated interaction with the simulator without taking over your screen. Taps, swipes, and text input run inside the simulator process.
+
+### Setup
+
+```bash
+# Install IDB (one-time setup)
+./scripts/setup-idb.sh
+```
+
+This installs:
+- `idb_companion` (Homebrew, from facebook/fb tap)
+- `idb` Python client (via uv)
+
+### Usage
+
+```bash
+# Boot simulator and connect IDB
+./scripts/sim.sh boot
+
+# Basic interactions
+./scripts/sim.sh tap 196 400        # Tap at coordinates
+./scripts/sim.sh swipe up           # Swipe direction
+./scripts/sim.sh type "hello"       # Type text
+
+# Build and run
+./scripts/sim.sh build              # Build app
+./scripts/sim.sh run                # Build, install, launch
+./scripts/sim.sh run --preview-terminal  # Launch in terminal mode
+
+# Screenshots
+./scripts/sim.sh screenshot myshot  # Save to screenshots/myshot.png
+
+# Test sequences (automated UI validation)
+./scripts/sim.sh test-keyboard      # Screenshot keyboard accessory bar
+./scripts/sim.sh test-connections   # Screenshot connection list
+./scripts/sim.sh test-flow          # Full flow with multiple screenshots
+
+# Convenience taps (pre-defined UI locations)
+./scripts/sim.sh tap-add            # Tap Add button
+./scripts/sim.sh tap-first-connection
+./scripts/sim.sh tap-terminal       # Focus terminal
+./scripts/sim.sh tap-close          # Tap back/close
+
+# See all commands
+./scripts/sim.sh help
+```
+
+### Preview Modes
+
+Launch app with specific UI state for testing:
+
+```bash
+./scripts/sim.sh launch --preview-terminal      # Terminal view
+./scripts/sim.sh launch --preview-keyboard      # Terminal + keyboard hint
+./scripts/sim.sh launch --preview-connections   # Connection list
+./scripts/sim.sh launch --preview-new-connection # New connection form
+```
+
+Screenshots are saved to `screenshots/` directory.

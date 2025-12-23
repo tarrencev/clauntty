@@ -11,6 +11,7 @@
 		7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */; };
 		D1000001 /* GhosttyAppTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000001 /* GhosttyAppTests.swift */; };
 		D1000002 /* TerminalSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000002 /* TerminalSurfaceTests.swift */; };
+		D1000003 /* KeyboardAccessoryViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2000003 /* KeyboardAccessoryViewTests.swift */; };
 		E1000001 /* SSHConnectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2000001 /* SSHConnectionUITests.swift */; };
 		8D50D6A34930F5200F1440E2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7856CABCC7D9170DD7EF307F /* Foundation.framework */; };
 		C0000001 /* ClaunttyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000001 /* ClaunttyApp.swift */; };
@@ -27,6 +28,7 @@
 		C0000012 /* TerminalSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000012 /* TerminalSurface.swift */; };
 		C0000013 /* SSHConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000013 /* SSHConnection.swift */; };
 		C0000014 /* SSHAuthenticator.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000014 /* SSHAuthenticator.swift */; };
+		C0000015 /* KeyboardAccessoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000015 /* KeyboardAccessoryView.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
 		C0000021 /* GhosttyKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -66,6 +68,7 @@
 		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
 		D2000001 /* GhosttyAppTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = GhosttyAppTests.swift; path = ../Tests/ClaunttyTests/GhosttyAppTests.swift; sourceTree = "<group>"; };
 		D2000002 /* TerminalSurfaceTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = TerminalSurfaceTests.swift; path = ../Tests/ClaunttyTests/TerminalSurfaceTests.swift; sourceTree = "<group>"; };
+		D2000003 /* KeyboardAccessoryViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = KeyboardAccessoryViewTests.swift; path = ../Tests/ClaunttyTests/KeyboardAccessoryViewTests.swift; sourceTree = "<group>"; };
 		E2000001 /* SSHConnectionUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnectionUITests.swift; sourceTree = "<group>"; };
 		E2000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		E2000003 /* ClaunttyUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -87,6 +90,7 @@
 		C1000012 /* TerminalSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalSurface.swift; sourceTree = "<group>"; };
 		C1000013 /* SSHConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConnection.swift; sourceTree = "<group>"; };
 		C1000014 /* SSHAuthenticator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHAuthenticator.swift; sourceTree = "<group>"; };
+		C1000015 /* KeyboardAccessoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardAccessoryView.swift; sourceTree = "<group>"; };
 		C1000020 /* GhosttyKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = GhosttyKit.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -132,6 +136,7 @@
 				023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */,
 				D2000001 /* GhosttyAppTests.swift */,
 				D2000002 /* TerminalSurfaceTests.swift */,
+				D2000003 /* KeyboardAccessoryViewTests.swift */,
 			);
 			name = ClaunttyTests;
 			path = ClaunttyTests;
@@ -214,6 +219,7 @@
 				C1000006 /* ConnectionListView.swift */,
 				C1000007 /* NewConnectionView.swift */,
 				C1000008 /* TerminalView.swift */,
+				C1000015 /* KeyboardAccessoryView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -388,6 +394,7 @@
 				7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */,
 				D1000001 /* GhosttyAppTests.swift in Sources */,
 				D1000002 /* TerminalSurfaceTests.swift in Sources */,
+				D1000003 /* KeyboardAccessoryViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -408,6 +415,7 @@
 				C0000012 /* TerminalSurface.swift in Sources */,
 				C0000013 /* SSHConnection.swift in Sources */,
 				C0000014 /* SSHAuthenticator.swift in Sources */,
+				C0000015 /* KeyboardAccessoryView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
