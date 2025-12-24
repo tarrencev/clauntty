@@ -75,9 +75,12 @@ class SessionManager: ObservableObject {
         // Deploy rtach and list sessions
         do {
             let deployer = RtachDeployer(connection: connection)
+            Logger.clauntty.info("SessionManager: ensuring rtach deployed...")
             try await deployer.ensureDeployed()
             rtachDeployers[poolKey] = deployer
+            Logger.clauntty.info("SessionManager: listing sessions...")
             let sessions = try await deployer.listSessions()
+            Logger.clauntty.info("SessionManager: found \(sessions.count) existing sessions")
             return (sessions: sessions, deployer: deployer)
         } catch {
             Logger.clauntty.warning("SessionManager: rtach deployment failed: \(error.localizedDescription)")
@@ -120,6 +123,9 @@ class SessionManager: ObservableObject {
             session.rtachSessionId = sessionId
             shellCommand = deployer.shellCommand(sessionId: sessionId)
             Logger.clauntty.info("SessionManager: using rtach session: \(sessionId.prefix(8))...")
+
+            // Update last accessed time for this session
+            try? await deployer.updateLastAccessed(sessionId: sessionId)
         }
 
         // Create a new channel for this session with the correct terminal size

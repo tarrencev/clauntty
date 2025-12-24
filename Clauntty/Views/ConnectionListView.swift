@@ -1,4 +1,5 @@
 import SwiftUI
+import os.log
 
 struct ConnectionListView: View {
     @EnvironmentObject var connectionStore: ConnectionStore
@@ -185,13 +186,20 @@ struct ConnectionListView: View {
                 await MainActor.run {
                     isConnecting = false
 
-                    if let result = result, !result.sessions.isEmpty {
-                        // Show session picker
-                        rtachSessions = result.sessions
-                        deployerForPicker = result.deployer
-                        connectionForPicker = connection
-                        showingSessionPicker = true
+                    if let result = result {
+                        Logger.clauntty.info("ConnectionListView: got \(result.sessions.count) sessions from connectAndListSessions")
+                        if !result.sessions.isEmpty {
+                            // Show session picker
+                            rtachSessions = result.sessions
+                            deployerForPicker = result.deployer
+                            connectionForPicker = connection
+                            showingSessionPicker = true
+                        } else {
+                            Logger.clauntty.info("ConnectionListView: no existing sessions, creating new")
+                            finalizeConnection(to: connection, rtachSessionId: nil)
+                        }
                     } else {
+                        Logger.clauntty.info("ConnectionListView: connectAndListSessions returned nil, creating new session")
                         // No existing sessions, create new one directly
                         finalizeConnection(to: connection, rtachSessionId: nil)
                     }

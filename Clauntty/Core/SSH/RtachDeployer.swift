@@ -5,6 +5,7 @@ import os.log
 struct SessionMetadata: Codable {
     var name: String
     var created: Date
+    var lastAccessed: Date?
 }
 
 /// Information about an existing rtach session on a remote server
@@ -24,6 +25,12 @@ struct RtachSession: Identifiable {
 }
 
 /// Handles deploying rtach to remote servers for session persistence
+///
+/// TODO: Versioned binary deployment
+/// Currently, if rtach is running (sessions active), we can't update the binary ("Text file busy").
+/// Fix: Deploy to versioned path (e.g., ~/.clauntty/bin/rtach-1.4.0) and update a symlink,
+/// or let new sessions use the new binary while old sessions continue on the old one.
+/// This allows updates without killing existing sessions.
 class RtachDeployer {
     private let connection: SSHConnection
 
@@ -31,10 +38,12 @@ class RtachDeployer {
     static let remoteBinPath = "~/.clauntty/bin/rtach"
     static let remoteSessionsPath = "~/.clauntty/sessions"
     static let remoteMetadataPath = "~/.clauntty/sessions.json"
+    static let claudeSettingsPath = "~/.claude/settings.json"
 
     /// Expected rtach version - must match rtach's version constant
     /// Increment this when rtach is updated to force redeployment
-    static let expectedVersion = "1.3.0"
+    /// 1.4.0 - Added shell integration (OSC 133) for input detection
+    static let expectedVersion = "1.4.0"
 
     init(connection: SSHConnection) {
         self.connection = connection
@@ -108,16 +117,20 @@ class RtachDeployer {
                 // Generate new name for sessions without metadata
                 sessionMeta = SessionMetadata(
                     name: SessionNameGenerator.generate(),
-                    created: Date(timeIntervalSince1970: epochTime)
+                    created: Date(timeIntervalSince1970: epochTime),
+                    lastAccessed: nil
                 )
                 metadata[sessionId] = sessionMeta
                 metadataChanged = true
             }
 
+            // Use lastAccessed from metadata if available, otherwise fall back to file mtime
+            let lastActiveDate = sessionMeta.lastAccessed ?? Date(timeIntervalSince1970: epochTime)
+
             let session = RtachSession(
                 id: sessionId,
                 name: sessionMeta.name,
-                lastActive: Date(timeIntervalSince1970: epochTime),
+                lastActive: lastActiveDate,
                 socketPath: fullPath,
                 created: sessionMeta.created
             )
@@ -154,7 +167,108 @@ class RtachDeployer {
         // Ensure sessions directory exists
         Logger.clauntty.info("RtachDeployer.ensureDeployed: creating sessions directory...")
         _ = try await connection.executeCommand("mkdir -p \(Self.remoteSessionsPath)")
+
+        // Deploy Claude Code hook for input detection
+        Logger.clauntty.info("RtachDeployer.ensureDeployed: deploying Claude Code hook...")
+        try await deployClaudeHook()
+
         Logger.clauntty.info("RtachDeployer.ensureDeployed: done")
+    }
+
+    // MARK: - Claude Code Hook
+
+    /// The Stop hook we inject to emit OSC 133;A when Claude finishes responding
+    private static let claunttyStopHook: [String: Any] = [
+        "hooks": [
+            [
+                "type": "command",
+                "command": "printf '\\e]133;A\\a' > /dev/tty"
+            ]
+        ]
+    ]
+
+    /// Deploy Claude Code hook for input detection (merges with existing settings)
+    private func deployClaudeHook() async throws {
+        // Read existing settings
+        let output = try await connection.executeCommand(
+            "cat \(Self.claudeSettingsPath) 2>/dev/null || echo '{}'"
+        )
+
+        let jsonString = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = jsonString.data(using: .utf8),
+              var settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Invalid JSON or empty, create fresh settings
+            try await writeClaudeSettings([:])
+            return
+        }
+
+        // Check if our hook already exists
+        if hasClaudeHook(in: settings) {
+            Logger.clauntty.info("Claude Code hook already configured")
+            return
+        }
+
+        // Merge our hook into settings
+        var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        var stopHooks = hooks["Stop"] as? [[String: Any]] ?? []
+
+        // Append our hook
+        stopHooks.append(Self.claunttyStopHook)
+        hooks["Stop"] = stopHooks
+        settings["hooks"] = hooks
+
+        try await writeClaudeSettings(settings)
+        Logger.clauntty.info("Claude Code hook deployed")
+    }
+
+    /// Check if our OSC 133 hook is already present
+    private func hasClaudeHook(in settings: [String: Any]) -> Bool {
+        guard let hooks = settings["hooks"] as? [String: Any],
+              let stopHooks = hooks["Stop"] as? [[String: Any]] else {
+            return false
+        }
+
+        // Look for our specific hook command
+        for hookEntry in stopHooks {
+            if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
+                for hook in innerHooks {
+                    if let command = hook["command"] as? String,
+                       command.contains("133;A") {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    /// Write Claude settings to remote server
+    private func writeClaudeSettings(_ settings: [String: Any]) async throws {
+        // Ensure directory exists
+        _ = try await connection.executeCommand("mkdir -p ~/.claude")
+
+        // Build settings with our hook if empty
+        var finalSettings = settings
+        if finalSettings.isEmpty {
+            finalSettings = [
+                "hooks": [
+                    "Stop": [Self.claunttyStopHook]
+                ]
+            ]
+        }
+
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: finalSettings,
+            options: [.prettyPrinted, .sortedKeys]
+        ) else {
+            Logger.clauntty.error("Failed to serialize Claude settings")
+            return
+        }
+
+        try await connection.executeWithStdin(
+            "cat > \(Self.claudeSettingsPath)",
+            stdinData: data
+        )
     }
 
     // MARK: - Session Metadata
@@ -232,11 +346,31 @@ class RtachDeployer {
             metadata[sessionId] = sessionMeta
         } else {
             // Create metadata if it doesn't exist
-            metadata[sessionId] = SessionMetadata(name: newName, created: Date())
+            metadata[sessionId] = SessionMetadata(name: newName, created: Date(), lastAccessed: nil)
         }
 
         try await saveSessionMetadata(metadata)
         Logger.clauntty.info("Session renamed: \(sessionId) -> \(newName)")
+    }
+
+    /// Update last accessed time for a session (call when connecting)
+    func updateLastAccessed(sessionId: String) async throws {
+        var metadata = try await loadSessionMetadata()
+
+        if var sessionMeta = metadata[sessionId] {
+            sessionMeta.lastAccessed = Date()
+            metadata[sessionId] = sessionMeta
+        } else {
+            // Create metadata if it doesn't exist
+            metadata[sessionId] = SessionMetadata(
+                name: SessionNameGenerator.generate(),
+                created: Date(),
+                lastAccessed: Date()
+            )
+        }
+
+        try await saveSessionMetadata(metadata)
+        Logger.clauntty.info("Updated last accessed for session: \(sessionId)")
     }
 
     // MARK: - Private

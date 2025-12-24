@@ -51,6 +51,28 @@ class Session: ObservableObject, Identifiable {
         return "\(connectionConfig.username)@\(connectionConfig.host)"
     }
 
+    // MARK: - Input Detection (OSC 133 Shell Integration)
+
+    /// Terminal prompt state based on OSC 133 sequences
+    enum PromptState {
+        case unknown           // No shell integration detected
+        case promptDisplayed   // OSC 133;A - prompt shown, waiting for input
+        case commandRunning    // OSC 133;B/C - command being executed
+        case commandFinished   // OSC 133;D - command completed
+    }
+
+    /// Current prompt state from shell integration
+    @Published private(set) var promptState: PromptState = .unknown
+
+    /// Whether the terminal is waiting for user input
+    @Published private(set) var isWaitingForInput: Bool = false
+
+    /// Timer for detecting inactivity after output stops
+    private var inactivityTimer: Timer?
+
+    /// How long to wait after output stops before considering terminal idle (seconds)
+    private let inactivityThreshold: TimeInterval = 1.5
+
     // MARK: - SSH Channel
 
     /// The SSH child channel for this session
@@ -115,6 +137,10 @@ class Session: ObservableObject, Identifiable {
 
     /// Detach the channel (on disconnect)
     func detach() {
+        // Clean up inactivity timer
+        inactivityTimer?.invalidate()
+        inactivityTimer = nil
+
         // Disconnect our SSH connection
         sshConnection?.disconnect()
         sshConnection = nil
@@ -130,6 +156,12 @@ class Session: ObservableObject, Identifiable {
 
     /// Handle data received from SSH
     func handleDataReceived(_ data: Data) {
+        // Parse OSC 133 sequences for shell integration
+        parseOSC133(data)
+
+        // Reset inactivity timer - we received output
+        resetInactivityTimer()
+
         // Append to scrollback buffer
         scrollbackBuffer.append(data)
 
@@ -141,6 +173,110 @@ class Session: ObservableObject, Identifiable {
 
         // Forward to terminal
         onDataReceived?(data)
+    }
+
+    // MARK: - OSC 133 Parsing (Shell Integration)
+
+    /// Parse OSC 133 sequences to detect prompt state
+    /// Format: ESC ] 133 ; <A|B|C|D> BEL  or  ESC ] 133 ; <A|B|C|D> ESC \
+    private func parseOSC133(_ data: Data) {
+        let bytes = [UInt8](data)
+        let ESC: UInt8 = 0x1B
+        let BRACKET: UInt8 = 0x5D  // ]
+        let SEMICOLON: UInt8 = 0x3B  // ;
+
+        // Debug: Log if we see any ESC sequences
+        var foundEsc = false
+        for i in 0..<bytes.count {
+            if bytes[i] == ESC && i + 1 < bytes.count && bytes[i + 1] == BRACKET {
+                foundEsc = true
+                let preview = bytes[i..<min(i + 10, bytes.count)]
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): found ESC] at \(i), bytes: \(preview.map { String(format: "%02X", $0) }.joined(separator: " "))")
+            }
+        }
+        if !foundEsc && bytes.count < 200 {
+            // Log small chunks to see what we're receiving
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): received \(bytes.count) bytes, no ESC] found")
+        }
+
+        // Look for ESC ] 133 ; <marker>
+        for i in 0..<bytes.count {
+            // Check for ESC ]
+            guard i + 6 < bytes.count,
+                  bytes[i] == ESC,
+                  bytes[i + 1] == BRACKET,
+                  bytes[i + 2] == 0x31,  // '1'
+                  bytes[i + 3] == 0x33,  // '3'
+                  bytes[i + 4] == 0x33,  // '3'
+                  bytes[i + 5] == SEMICOLON else {
+                continue
+            }
+
+            let marker = bytes[i + 6]
+            let newState: PromptState
+
+            switch marker {
+            case 0x41:  // 'A' - Prompt displayed - immediately ready for input!
+                newState = .promptDisplayed
+                if !isWaitingForInput {
+                    isWaitingForInput = true
+                    Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input (OSC 133;A)")
+                }
+            case 0x42, 0x43:  // 'B' or 'C' - Command started/executing
+                newState = .commandRunning
+                isWaitingForInput = false  // Definitely not waiting
+            case 0x44:  // 'D' - Command finished
+                newState = .commandFinished
+            default:
+                continue
+            }
+
+            if promptState != newState {
+                promptState = newState
+                Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): prompt state -> \(String(describing: newState))")
+            }
+        }
+    }
+
+    // MARK: - Inactivity Detection
+
+    /// Reset the inactivity timer when output is received
+    private func resetInactivityTimer() {
+        inactivityTimer?.invalidate()
+
+        // If we were waiting for input, we're not anymore (got output)
+        if isWaitingForInput {
+            isWaitingForInput = false
+        }
+
+        // Schedule timer to check for idle state
+        inactivityTimer = Timer.scheduledTimer(withTimeInterval: inactivityThreshold, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                self?.checkIfWaitingForInput()
+            }
+        }
+    }
+
+    /// Check if terminal is waiting for input after inactivity period
+    private func checkIfWaitingForInput() {
+        // If prompt is displayed or command just finished, we're likely waiting for input
+        switch promptState {
+        case .promptDisplayed, .commandFinished:
+            if !isWaitingForInput {
+                isWaitingForInput = true
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input")
+            }
+        case .unknown:
+            // No shell integration - fallback to pure inactivity detection
+            // Less reliable but better than nothing
+            if !isWaitingForInput {
+                isWaitingForInput = true
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input (fallback, no OSC 133)")
+            }
+        case .commandRunning:
+            // Command is running, not waiting for input
+            break
+        }
     }
 
     /// Send data to remote (keyboard input)
