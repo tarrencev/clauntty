@@ -15,6 +15,21 @@ struct ContentView: View {
     /// Minimum swipe distance to trigger action
     private let swipeThreshold: CGFloat = 80
 
+    /// Current swipe offset for interactive transition
+    @State private var swipeOffset: CGFloat = 0
+
+    /// Whether we're currently in an interactive swipe
+    @State private var isSwipingFromLeftEdge: Bool = false
+
+    /// Source tab when swipe started (to maintain during animation)
+    @State private var swipeSourceTab: SessionManager.ActiveTab?
+
+    /// Target tab during swipe (for preview)
+    @State private var swipeTargetTab: SessionManager.ActiveTab?
+
+    /// Whether we're in the completion animation phase
+    @State private var isCompletingSwipe: Bool = false
+
     var body: some View {
         NavigationStack {
             if sessionManager.hasSessions {
@@ -31,15 +46,17 @@ struct ContentView: View {
                             // Terminal tabs
                             ForEach(sessionManager.sessions) { session in
                                 TerminalView(session: session)
-                                    .opacity(sessionManager.activeTab == .terminal(session.id) ? 1 : 0)
-                                    .allowsHitTesting(sessionManager.activeTab == .terminal(session.id))
+                                    .offset(x: offsetForTab(.terminal(session.id), screenWidth: geometry.size.width))
+                                    .opacity(opacityForTab(.terminal(session.id)))
+                                    .allowsHitTesting(sessionManager.activeTab == .terminal(session.id) && swipeOffset == 0)
                             }
 
                             // Web tabs
                             ForEach(sessionManager.webTabs) { webTab in
                                 WebTabView(webTab: webTab)
-                                    .opacity(sessionManager.activeTab == .web(webTab.id) ? 1 : 0)
-                                    .allowsHitTesting(sessionManager.activeTab == .web(webTab.id))
+                                    .offset(x: offsetForTab(.web(webTab.id), screenWidth: geometry.size.width))
+                                    .opacity(opacityForTab(.web(webTab.id)))
+                                    .allowsHitTesting(sessionManager.activeTab == .web(webTab.id) && swipeOffset == 0)
                             }
 
                             // Edge swipe gesture overlay
@@ -47,16 +64,52 @@ struct ContentView: View {
                                 screenWidth: geometry.size.width,
                                 edgeThreshold: edgeThreshold,
                                 swipeThreshold: swipeThreshold,
-                                onSwipeLeft: {
-                                    // Swipe left from right edge → go to next tab waiting for input
-                                    if sessionManager.switchToNextWaitingTab() {
-                                        triggerHaptic()
+                                onDragStart: { isLeftEdge in
+                                    isSwipingFromLeftEdge = isLeftEdge
+                                    swipeSourceTab = sessionManager.activeTab
+                                    // Determine target tab
+                                    if isLeftEdge {
+                                        swipeTargetTab = sessionManager.previousActiveTab
+                                    } else {
+                                        swipeTargetTab = sessionManager.nextWaitingTab()
                                     }
                                 },
-                                onSwipeRight: {
-                                    // Swipe right from left edge → go to previous tab
-                                    sessionManager.switchToPreviousTab()
-                                    triggerHaptic()
+                                onDragProgress: { offset in
+                                    swipeOffset = offset
+                                },
+                                onDragEnd: { completed in
+                                    let screenWidth = geometry.size.width
+                                    if completed && swipeTargetTab != nil {
+                                        isCompletingSwipe = true
+                                        triggerHaptic()
+                                        // Animate to full screen width first
+                                        let targetOffset = isSwipingFromLeftEdge ? screenWidth : -screenWidth
+                                        withAnimation(.easeOut(duration: 0.2)) {
+                                            swipeOffset = targetOffset
+                                        }
+                                        // Then switch tabs and reset
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                                            if isSwipingFromLeftEdge {
+                                                sessionManager.switchToPreviousTab()
+                                            } else {
+                                                sessionManager.switchToNextWaitingTab()
+                                            }
+                                            // Reset without animation since views are now in correct position
+                                            swipeOffset = 0
+                                            swipeSourceTab = nil
+                                            swipeTargetTab = nil
+                                            isCompletingSwipe = false
+                                        }
+                                    } else {
+                                        // Cancelled - animate back to zero
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                            swipeOffset = 0
+                                        }
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                            swipeSourceTab = nil
+                                            swipeTargetTab = nil
+                                        }
+                                    }
                                 }
                             )
                         }
@@ -141,6 +194,58 @@ struct ContentView: View {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
     }
+
+    // MARK: - Swipe Transition Helpers
+
+    /// Calculate X offset for a tab during swipe
+    private func offsetForTab(_ tab: SessionManager.ActiveTab, screenWidth: CGFloat) -> CGFloat {
+        // Use swipeSourceTab during swipe, otherwise use activeTab
+        let activeTab = swipeSourceTab ?? sessionManager.activeTab
+        let isSource = activeTab == tab
+        let isTarget = swipeTargetTab == tab
+
+        if swipeOffset == 0 && swipeSourceTab == nil {
+            // No swipe in progress
+            let isActive = sessionManager.activeTab == tab
+            return isActive ? 0 : screenWidth
+        }
+
+        if isSource {
+            // Source tab slides with the swipe
+            return swipeOffset
+        } else if isTarget {
+            // Target tab slides in from the opposite side
+            if isSwipingFromLeftEdge {
+                // Swiping right: target comes from left
+                return -screenWidth + swipeOffset
+            } else {
+                // Swiping left: target comes from right
+                return screenWidth + swipeOffset
+            }
+        } else {
+            // Other tabs stay offscreen
+            return screenWidth
+        }
+    }
+
+    /// Calculate opacity for a tab during swipe
+    private func opacityForTab(_ tab: SessionManager.ActiveTab) -> Double {
+        // Use swipeSourceTab during swipe, otherwise use activeTab
+        let activeTab = swipeSourceTab ?? sessionManager.activeTab
+        let isSource = activeTab == tab
+        let isTarget = swipeTargetTab == tab
+
+        if swipeOffset == 0 && swipeSourceTab == nil {
+            let isActive = sessionManager.activeTab == tab
+            return isActive ? 1 : 0
+        }
+
+        // Both source and target are visible during swipe
+        if isSource || isTarget {
+            return 1
+        }
+        return 0
+    }
 }
 
 // MARK: - Edge Swipe Gesture View
@@ -150,16 +255,18 @@ struct EdgeSwipeGestureView: UIViewRepresentable {
     let screenWidth: CGFloat
     let edgeThreshold: CGFloat
     let swipeThreshold: CGFloat
-    let onSwipeLeft: () -> Void
-    let onSwipeRight: () -> Void
+    let onDragStart: (Bool) -> Void  // Bool: isLeftEdge
+    let onDragProgress: (CGFloat) -> Void  // Current offset
+    let onDragEnd: (Bool) -> Void  // Bool: should complete transition
 
     func makeUIView(context: Context) -> EdgeSwipeUIView {
         let view = EdgeSwipeUIView()
         view.screenWidth = screenWidth
         view.edgeThreshold = edgeThreshold
         view.swipeThreshold = swipeThreshold
-        view.onSwipeLeft = onSwipeLeft
-        view.onSwipeRight = onSwipeRight
+        view.onDragStart = onDragStart
+        view.onDragProgress = onDragProgress
+        view.onDragEnd = onDragEnd
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = true
         return view
@@ -169,22 +276,25 @@ struct EdgeSwipeGestureView: UIViewRepresentable {
         uiView.screenWidth = screenWidth
         uiView.edgeThreshold = edgeThreshold
         uiView.swipeThreshold = swipeThreshold
-        uiView.onSwipeLeft = onSwipeLeft
-        uiView.onSwipeRight = onSwipeRight
+        uiView.onDragStart = onDragStart
+        uiView.onDragProgress = onDragProgress
+        uiView.onDragEnd = onDragEnd
     }
 }
 
-/// UIView subclass that handles edge swipe gestures
+/// UIView subclass that handles edge swipe gestures with interactive feedback
 class EdgeSwipeUIView: UIView {
     var screenWidth: CGFloat = 0
     var edgeThreshold: CGFloat = 30
     var swipeThreshold: CGFloat = 80
-    var onSwipeLeft: (() -> Void)?
-    var onSwipeRight: (() -> Void)?
+    var onDragStart: ((Bool) -> Void)?
+    var onDragProgress: ((CGFloat) -> Void)?
+    var onDragEnd: ((Bool) -> Void)?
 
     private var touchStartX: CGFloat = 0
     private var touchStartedFromEdge: Bool = false
     private var isLeftEdge: Bool = false
+    private var hasStartedDrag: Bool = false
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         // Only handle touches that start near the edges
@@ -206,34 +316,61 @@ class EdgeSwipeUIView: UIView {
         touchStartX = location.x
         isLeftEdge = location.x < edgeThreshold
         touchStartedFromEdge = isLeftEdge || location.x > bounds.width - edgeThreshold
+        hasStartedDrag = false
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        // Optional: could add visual feedback here
+        guard let touch = touches.first, touchStartedFromEdge else { return }
+
+        let location = touch.location(in: self)
+        let deltaX = location.x - touchStartX
+
+        // Check if we're swiping in the correct direction
+        let isValidSwipe = (isLeftEdge && deltaX > 0) || (!isLeftEdge && deltaX < 0)
+
+        if isValidSwipe {
+            if !hasStartedDrag {
+                hasStartedDrag = true
+                onDragStart?(isLeftEdge)
+            }
+            onDragProgress?(deltaX)
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first, touchStartedFromEdge else {
-            touchStartedFromEdge = false
+            resetState()
             return
         }
 
         let location = touch.location(in: self)
         let deltaX = location.x - touchStartX
 
-        if isLeftEdge && deltaX > swipeThreshold {
-            // Swiped right from left edge → go to previous tab
-            onSwipeRight?()
-        } else if !isLeftEdge && deltaX < -swipeThreshold {
-            // Swiped left from right edge → go to next waiting tab
-            onSwipeLeft?()
+        // Determine if swipe should complete the transition
+        let shouldComplete: Bool
+        if isLeftEdge {
+            shouldComplete = deltaX > swipeThreshold
+        } else {
+            shouldComplete = deltaX < -swipeThreshold
         }
 
-        touchStartedFromEdge = false
+        if hasStartedDrag {
+            onDragEnd?(shouldComplete)
+        }
+
+        resetState()
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if hasStartedDrag {
+            onDragEnd?(false)
+        }
+        resetState()
+    }
+
+    private func resetState() {
         touchStartedFromEdge = false
+        hasStartedDrag = false
     }
 }
 

@@ -452,6 +452,19 @@ class SessionManager: ObservableObject {
         Logger.clauntty.info("SessionManager: no tabs waiting for input")
         return false
     }
+
+    /// Get the next terminal session waiting for input without switching
+    /// Used for interactive swipe preview
+    func nextWaitingTab() -> ActiveTab? {
+        let waitingSessions = sessions.filter { session in
+            session.isWaitingForInput && activeTab != .terminal(session.id)
+        }
+
+        if let nextSession = waitingSessions.first {
+            return .terminal(nextSession.id)
+        }
+        return nil
+    }
 }
 
 // MARK: - Errors
