@@ -21,6 +21,7 @@ struct ConnectionListView: View {
     @State private var deployerForPicker: RtachDeployer?
     @State private var connectionError: String?
     @State private var showingError = false
+    @State private var showingSettings = false
 
     var body: some View {
         List {
@@ -52,6 +53,13 @@ struct ConnectionListView: View {
         }
         .navigationTitle("Servers")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                Button {
+                    showingSettings = true
+                } label: {
+                    Image(systemName: "gear")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     showingNewConnection = true
@@ -65,6 +73,9 @@ struct ConnectionListView: View {
         }
         .sheet(item: $connectionToEdit) { connection in
             NewConnectionView(existingConnection: connection)
+        }
+        .sheet(isPresented: $showingSettings) {
+            SettingsView()
         }
         .alert("Enter Password", isPresented: $showingPasswordPrompt) {
             SecureField("Password", text: $enteredPassword)

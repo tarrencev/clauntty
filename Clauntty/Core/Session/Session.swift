@@ -38,7 +38,28 @@ class Session: ObservableObject, Identifiable {
     @Published var state: State = .disconnected
 
     /// Dynamic title set by terminal escape sequences (OSC 0/1/2)
-    @Published var dynamicTitle: String?
+    @Published var dynamicTitle: String? {
+        didSet {
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): dynamicTitle set to '\(self.dynamicTitle ?? "nil")'")
+
+            // Persist the title for session restoration
+            if let title = dynamicTitle, let sessionId = rtachSessionId {
+                let key = Self.titleStorageKey(connectionId: connectionConfig.id, rtachSessionId: sessionId)
+                UserDefaults.standard.set(title, forKey: key)
+
+                // If this is a Claude session (has ✳️), remember that permanently
+                if title.contains("\u{2733}") {
+                    markAsClaudeSession()
+                }
+            }
+
+            // Check for pending notification when title is set
+            checkPendingNotification()
+        }
+    }
+
+    /// Whether this session has ever been identified as Claude (persisted)
+    private var _isClaudeSession: Bool = false
 
     /// Display title for tab - prefer dynamic title if set
     var title: String {
@@ -51,20 +72,63 @@ class Session: ObservableObject, Identifiable {
         return "\(connectionConfig.username)@\(connectionConfig.host)"
     }
 
-    // MARK: - Input Detection (OSC 133 Shell Integration)
-
-    /// Terminal prompt state based on OSC 133 sequences
-    enum PromptState {
-        case unknown           // No shell integration detected
-        case promptDisplayed   // OSC 133;A - prompt shown, waiting for input
-        case commandRunning    // OSC 133;B/C - command being executed
-        case commandFinished   // OSC 133;D - command completed
+    /// Whether this appears to be a Claude Code session (detected by ✳️ in title)
+    var isClaudeSession: Bool {
+        // If we have a title, always check it directly (handles user exiting Claude)
+        if let title = dynamicTitle {
+            return title.contains("\u{2733}")  // ✳️ eight-spoked asterisk
+        }
+        // No title yet - use persisted flag (bridges gap during session restore)
+        return _isClaudeSession
     }
 
-    /// Current prompt state from shell integration
-    @Published private(set) var promptState: PromptState = .unknown
+    /// Whether we have a pending notification waiting for title to be set
+    private var pendingNotificationCheck: Bool = false
 
-    /// Whether the terminal is waiting for user input
+    /// Mark this session as a Claude session (persisted)
+    private func markAsClaudeSession() {
+        guard !_isClaudeSession else { return }
+        _isClaudeSession = true
+        if let sessionId = rtachSessionId {
+            let key = Self.claudeSessionKey(connectionId: connectionConfig.id, rtachSessionId: sessionId)
+            UserDefaults.standard.set(true, forKey: key)
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): marked as Claude session")
+        }
+    }
+
+    /// Restore Claude session flag from UserDefaults
+    private func restoreClaudeSessionFlag(rtachSessionId: String) {
+        let key = Self.claudeSessionKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId)
+        _isClaudeSession = UserDefaults.standard.bool(forKey: key)
+        if _isClaudeSession {
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): restored Claude session flag")
+        }
+    }
+
+    /// Storage key for Claude session flag
+    private static func claudeSessionKey(connectionId: UUID, rtachSessionId: String) -> String {
+        return "session_claude_\(connectionId.uuidString)_\(rtachSessionId)"
+    }
+
+    /// Check if we should send a notification (called when title is set)
+    /// Note: We don't check isWaitingForInput here because more data may have arrived
+    /// after the inactivity timeout. The pending flag itself means we were waiting.
+    private func checkPendingNotification() {
+        guard pendingNotificationCheck else { return }
+
+        pendingNotificationCheck = false
+        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): checking pending notification, isClaudeSession=\(self.isClaudeSession)")
+
+        if NotificationManager.shared.shouldNotify(for: self) {
+            Task {
+                await NotificationManager.shared.scheduleInputReady(session: self)
+            }
+        }
+    }
+
+    // MARK: - Input Detection (Inactivity-based)
+
+    /// Whether the terminal is waiting for user input (detected via inactivity timeout)
     @Published private(set) var isWaitingForInput: Bool = false
 
     /// Timer for detecting inactivity after output stops
@@ -97,7 +161,35 @@ class Session: ObservableObject, Identifiable {
     // MARK: - rtach Session
 
     /// The rtach session ID to use when connecting (nil = create new session)
-    var rtachSessionId: String?
+    var rtachSessionId: String? {
+        didSet {
+            // Restore the saved title when resuming a session
+            if let sessionId = rtachSessionId {
+                restoreSavedTitle(rtachSessionId: sessionId)
+            }
+        }
+    }
+
+    /// Storage key for persisting dynamic title
+    private static func titleStorageKey(connectionId: UUID, rtachSessionId: String) -> String {
+        return "session_title_\(connectionId.uuidString)_\(rtachSessionId)"
+    }
+
+    /// Restore saved title for a resumed session
+    private func restoreSavedTitle(rtachSessionId: String) {
+        // Restore Claude session flag first
+        restoreClaudeSessionFlag(rtachSessionId: rtachSessionId)
+
+        // Restore title
+        let key = Self.titleStorageKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId)
+        if let savedTitle = UserDefaults.standard.string(forKey: key) {
+            // Only restore if we don't already have a dynamic title
+            if dynamicTitle == nil {
+                dynamicTitle = savedTitle
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): restored title '\(savedTitle.prefix(30))'")
+            }
+        }
+    }
 
     // MARK: - Scrollback Buffer
 
@@ -144,6 +236,24 @@ class Session: ObservableObject, Identifiable {
 
     /// Whether we've already requested scrollback for this session
     private var scrollbackRequested = false
+
+    // MARK: - Command Message State
+
+    /// State machine for receiving command messages from rtach
+    private enum CommandState {
+        case idle                          // Not receiving a command
+        case waitingForHeader              // Saw command type byte, waiting for rest of header
+        case receivingData(remaining: Int) // Receiving command data
+    }
+
+    /// Current command receive state
+    private var commandState: CommandState = .idle
+
+    /// Buffer for accumulating command header
+    private var commandHeaderBuffer = Data()
+
+    /// Buffer for accumulating command data
+    private var commandDataBuffer = Data()
 
     // MARK: - Initialization
 
@@ -273,14 +383,85 @@ class Session: ObservableObject, Identifiable {
 
     /// Handle normal terminal data
     private func handleNormalData(_ data: Data) {
+        var remainingData = data
+
+        // Check for command messages from rtach (type byte = 2)
+        // These can arrive mixed with terminal data
+        while !remainingData.isEmpty {
+            switch commandState {
+            case .idle:
+                // Check if this looks like a command message (type = 2)
+                if remainingData[0] == 2 {
+                    // Start accumulating command header
+                    commandState = .waitingForHeader
+                    commandHeaderBuffer.removeAll()
+                    commandHeaderBuffer.append(remainingData[0])
+                    remainingData = remainingData.dropFirst(1)
+                } else {
+                    // Normal terminal data - process and return
+                    processTerminalData(remainingData)
+                    return
+                }
+
+            case .waitingForHeader:
+                // Accumulate bytes until we have 5 bytes for the header
+                let headerSize = 5  // 1 byte type + 4 bytes length
+                let needed = headerSize - commandHeaderBuffer.count
+                let available = min(needed, remainingData.count)
+
+                commandHeaderBuffer.append(remainingData.prefix(available))
+                remainingData = remainingData.dropFirst(available)
+
+                if commandHeaderBuffer.count >= headerSize {
+                    // Parse header: [type: 1 byte][length: 4 bytes little-endian]
+                    let type = commandHeaderBuffer[0]
+                    let length = commandHeaderBuffer.withUnsafeBytes { ptr -> UInt32 in
+                        ptr.loadUnaligned(fromByteOffset: 1, as: UInt32.self)
+                    }
+
+                    if type == 2 && length > 0 && length < 1024 {
+                        // Valid command header - receive data
+                        commandState = .receivingData(remaining: Int(length))
+                        commandDataBuffer.removeAll(keepingCapacity: true)
+                    } else if type == 2 && length == 0 {
+                        // Empty command (shouldn't happen, but handle it)
+                        commandState = .idle
+                        commandHeaderBuffer.removeAll()
+                    } else {
+                        // Not a valid command - treat header bytes as terminal data
+                        Logger.clauntty.debug("Invalid command header, forwarding as terminal data")
+                        processTerminalData(commandHeaderBuffer)
+                        commandState = .idle
+                        commandHeaderBuffer.removeAll()
+                    }
+                }
+
+            case .receivingData(let remaining):
+                let toRead = min(remaining, remainingData.count)
+                commandDataBuffer.append(remainingData.prefix(toRead))
+                remainingData = remainingData.dropFirst(toRead)
+
+                let newRemaining = remaining - toRead
+                if newRemaining <= 0 {
+                    // Complete command - dispatch it
+                    if let commandString = String(data: commandDataBuffer, encoding: .utf8) {
+                        Logger.clauntty.info("Received command from rtach: \(commandString)")
+                        handleRtachCommand(commandString)
+                    }
+                    commandState = .idle
+                    commandHeaderBuffer.removeAll()
+                    commandDataBuffer.removeAll()
+                } else {
+                    commandState = .receivingData(remaining: newRemaining)
+                }
+            }
+        }
+    }
+
+    /// Process actual terminal data (after command detection)
+    private func processTerminalData(_ data: Data) {
         // Track loading state for showing loading indicator
         updateLoadingState(bytesReceived: data.count)
-
-        // Parse OSC 133 sequences for shell integration
-        parseOSC133(data)
-
-        // Parse OSC 777 sequences for Clauntty commands (port forwarding)
-        parseOSC777(data)
 
         // Reset inactivity timer - we received output
         resetInactivityTimer()
@@ -296,6 +477,28 @@ class Session: ObservableObject, Identifiable {
 
         // Forward to terminal
         onDataReceived?(data)
+    }
+
+    /// Handle a command received from rtach via command pipe
+    /// Format: "command;arg1;arg2..."
+    private func handleRtachCommand(_ command: String) {
+        let parts = command.split(separator: ";", maxSplits: 1)
+        guard let cmd = parts.first else { return }
+
+        switch cmd {
+        case "open":
+            if parts.count > 1, let port = Int(parts[1]) {
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): rtach command open port \(port)")
+                onOpenTabRequested?(port)
+            }
+        case "forward":
+            if parts.count > 1, let port = Int(parts[1]) {
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): rtach command forward port \(port)")
+                onPortForwardRequested?(port)
+            }
+        default:
+            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
+        }
     }
 
     /// Handle scrollback response data (when in scrollback receive mode)
@@ -374,126 +577,6 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
-    // MARK: - OSC 133 Parsing (Shell Integration)
-
-    /// Parse OSC 133 sequences to detect prompt state
-    /// Format: ESC ] 133 ; <A|B|C|D> BEL  or  ESC ] 133 ; <A|B|C|D> ESC \
-    private func parseOSC133(_ data: Data) {
-        let bytes = [UInt8](data)
-        let ESC: UInt8 = 0x1B
-        let BRACKET: UInt8 = 0x5D  // ]
-        let SEMICOLON: UInt8 = 0x3B  // ;
-
-        // Look for ESC ] 133 ; <marker>
-        for i in 0..<bytes.count {
-            // Check for ESC ]
-            guard i + 6 < bytes.count,
-                  bytes[i] == ESC,
-                  bytes[i + 1] == BRACKET,
-                  bytes[i + 2] == 0x31,  // '1'
-                  bytes[i + 3] == 0x33,  // '3'
-                  bytes[i + 4] == 0x33,  // '3'
-                  bytes[i + 5] == SEMICOLON else {
-                continue
-            }
-
-            let marker = bytes[i + 6]
-            let newState: PromptState
-
-            switch marker {
-            case 0x41:  // 'A' - Prompt displayed - immediately ready for input!
-                newState = .promptDisplayed
-                if !isWaitingForInput {
-                    isWaitingForInput = true
-                }
-            case 0x42, 0x43:  // 'B' or 'C' - Command started/executing
-                newState = .commandRunning
-                isWaitingForInput = false  // Definitely not waiting
-            case 0x44:  // 'D' - Command finished
-                newState = .commandFinished
-            default:
-                continue
-            }
-
-            promptState = newState
-        }
-    }
-
-    // MARK: - OSC 777 Parsing (Clauntty Commands)
-
-    /// Parse OSC 777 sequences for Clauntty-specific commands
-    /// Format: ESC ] 777 ; <command> ; <args> BEL  or  ESC ] 777 ; <command> ; <args> ESC \
-    /// Commands:
-    ///   - forward;<port> - Forward a port
-    ///   - open;<port>    - Open a web tab for a port
-    private func parseOSC777(_ data: Data) {
-        let bytes = [UInt8](data)
-        let ESC: UInt8 = 0x1B
-        let BRACKET: UInt8 = 0x5D  // ]
-        let BEL: UInt8 = 0x07
-        let BACKSLASH: UInt8 = 0x5C  // \
-
-        // Look for ESC ] 7 7 7 ;
-        var i = 0
-        while i < bytes.count {
-            // Check for ESC ]
-            guard i + 5 < bytes.count,
-                  bytes[i] == ESC,
-                  bytes[i + 1] == BRACKET,
-                  bytes[i + 2] == 0x37,  // '7'
-                  bytes[i + 3] == 0x37,  // '7'
-                  bytes[i + 4] == 0x37,  // '7'
-                  bytes[i + 5] == 0x3B   // ';'
-            else {
-                i += 1
-                continue
-            }
-
-            // Find the end of the OSC sequence (BEL or ESC \)
-            var endIndex = i + 6
-            while endIndex < bytes.count {
-                if bytes[endIndex] == BEL {
-                    break
-                }
-                if bytes[endIndex] == ESC && endIndex + 1 < bytes.count && bytes[endIndex + 1] == BACKSLASH {
-                    break
-                }
-                endIndex += 1
-            }
-
-            // Extract the payload between the semicolon and terminator
-            if endIndex > i + 6 {
-                let payloadBytes = Array(bytes[(i + 6)..<endIndex])
-                if let payload = String(bytes: payloadBytes, encoding: .utf8) {
-                    handleOSC777Command(payload)
-                }
-            }
-
-            i = endIndex + 1
-        }
-    }
-
-    /// Handle a parsed OSC 777 command
-    private func handleOSC777Command(_ payload: String) {
-        let parts = payload.split(separator: ";", maxSplits: 1)
-        guard let command = parts.first else { return }
-
-        switch command {
-        case "forward":
-            if parts.count > 1, let port = Int(parts[1]) {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): OSC 777 forward port \(port)")
-                onPortForwardRequested?(port)
-            }
-        case "open":
-            if parts.count > 1, let port = Int(parts[1]) {
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): OSC 777 open tab port \(port)")
-                onOpenTabRequested?(port)
-            }
-        default:
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): unknown OSC 777 command: \(command)")
-        }
-    }
-
     // MARK: - Inactivity Detection
 
     /// Reset the inactivity timer when output is received
@@ -515,23 +598,28 @@ class Session: ObservableObject, Identifiable {
 
     /// Check if terminal is waiting for input after inactivity period
     private func checkIfWaitingForInput() {
-        // If prompt is displayed or command just finished, we're likely waiting for input
-        switch promptState {
-        case .promptDisplayed, .commandFinished:
-            if !isWaitingForInput {
-                isWaitingForInput = true
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input")
+        // Inactivity-based detection: no output for 1.5s means likely waiting for input
+        if !isWaitingForInput {
+            isWaitingForInput = true
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input")
+            checkNotificationForWaitingInput()
+        }
+    }
+
+    /// Check if we should send a notification when waiting for input
+    private func checkNotificationForWaitingInput() {
+        // If we have title info, check notification immediately
+        if dynamicTitle != nil || _isClaudeSession {
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): checking notification, isClaudeSession=\(self.isClaudeSession)")
+            if NotificationManager.shared.shouldNotify(for: self) {
+                Task {
+                    await NotificationManager.shared.scheduleInputReady(session: self)
+                }
             }
-        case .unknown:
-            // No shell integration - fallback to pure inactivity detection
-            // Less reliable but better than nothing
-            if !isWaitingForInput {
-                isWaitingForInput = true
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input (fallback, no OSC 133)")
-            }
-        case .commandRunning:
-            // Command is running, not waiting for input
-            break
+        } else {
+            // No title yet - wait for title to be set
+            pendingNotificationCheck = true
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pending notification check (waiting for title)")
         }
     }
 

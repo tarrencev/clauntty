@@ -5,6 +5,12 @@ import os.log
 /// From ghostty/src/config/Config.zig: background: Color = .{ .r = 0x28, .g = 0x2C, .b = 0x34 }
 private let terminalBackgroundColor = Color(red: 40/255.0, green: 44/255.0, blue: 52/255.0) // #282C34
 
+/// Wrapper class to hold terminal surface reference (works with SwiftUI @StateObject)
+@MainActor
+class TerminalSurfaceHolder: ObservableObject {
+    @Published var surface: TerminalSurfaceView?
+}
+
 struct TerminalView: View {
     @EnvironmentObject var ghosttyApp: GhosttyApp
     @EnvironmentObject var sessionManager: SessionManager
@@ -12,8 +18,8 @@ struct TerminalView: View {
     /// The session this terminal view is displaying
     @ObservedObject var session: Session
 
-    /// Reference to the terminal surface view for SSH data flow
-    @State private var terminalSurface: TerminalSurfaceView?
+    /// Reference to the terminal surface view for SSH data flow (wrapped in class for SwiftUI)
+    @StateObject private var surfaceHolder = TerminalSurfaceHolder()
 
     /// Whether this terminal is currently the active tab
     private var isActive: Bool {
@@ -67,12 +73,22 @@ struct TerminalView: View {
                     },
                     onSurfaceReady: { surface in
                         Logger.clauntty.info("onSurfaceReady called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")
-                        self.terminalSurface = surface
+                        surfaceHolder.surface = surface
                         connectSession(surface: surface)
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .id(session.id)  // Force new surface per session
+                .onChange(of: session.state) { oldState, newState in
+                    // Force re-render when session connects/reconnects
+                    // This fixes blank/partial rendering after reconnection
+                    if case .connected = newState {
+                        Logger.clauntty.info("Session state changed to connected, forcing redraw")
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                            surfaceHolder.surface?.forceRedraw()
+                        }
+                    }
+                }
 
                 // Show connecting overlay
                 if session.state == .connecting {
@@ -86,30 +102,6 @@ struct TerminalView: View {
                             .foregroundColor(.white)
                             .padding(.top)
                     }
-                }
-
-                // Show loading indicator when receiving large data burst
-                if session.isLoadingContent && session.state == .connected {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Spacer()
-                            HStack(spacing: 8) {
-                                ProgressView()
-                                    .tint(.white)
-                                Text("Loading...")
-                                    .foregroundColor(.white)
-                                    .font(.caption)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.black.opacity(0.7))
-                            .cornerRadius(8)
-                            .padding()
-                        }
-                    }
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.2), value: session.isLoadingContent)
                 }
 
                 // Show error overlay
@@ -135,6 +127,35 @@ struct TerminalView: View {
                     }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .captureTerminalText)) { _ in
+            // Only capture if this is the active terminal
+            guard isActive, let surface = surfaceHolder.surface else { return }
+            handleCaptureTerminalText(surface: surface)
+        }
+    }
+
+    /// Handle request to capture terminal text (from URL scheme)
+    private func handleCaptureTerminalText(surface: TerminalSurfaceView) {
+        Logger.clauntty.info("Capturing terminal text for session \(session.id.uuidString.prefix(8))")
+
+        guard let text = surface.captureVisibleText() else {
+            Logger.clauntty.error("Failed to capture terminal text")
+            return
+        }
+
+        // Write to app's Documents directory (accessible via simctl)
+        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            Logger.clauntty.error("Failed to get Documents directory")
+            return
+        }
+        let filePath = documentsPath.appendingPathComponent("clauntty_dump.txt")
+
+        do {
+            try text.write(to: filePath, atomically: true, encoding: .utf8)
+            Logger.clauntty.info("Terminal text written to \(filePath.path) (\(text.count) chars)")
+        } catch {
+            Logger.clauntty.error("Failed to write terminal text: \(error.localizedDescription)")
         }
     }
 

@@ -198,19 +198,26 @@ struct SessionTab: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Connection status indicator with waiting overlay
+            // Connection status indicator with waiting/loading overlay
             ZStack {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 6, height: 6)
-
-                // Pulsing ring when waiting for input
-                if session.isWaitingForInput && !isActive {
-                    Circle()
-                        .stroke(Color.blue, lineWidth: 1.5)
+                if session.isLoadingContent {
+                    // Loading spinner when receiving large data burst
+                    ProgressView()
+                        .scaleEffect(0.5)
                         .frame(width: 10, height: 10)
-                        .opacity(isPulsing ? 0.3 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
+                } else {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+
+                    // Pulsing ring when waiting for input
+                    if session.isWaitingForInput && !isActive {
+                        Circle()
+                            .stroke(Color.blue, lineWidth: 1.5)
+                            .frame(width: 10, height: 10)
+                            .opacity(isPulsing ? 0.3 : 1.0)
+                            .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isPulsing)
+                    }
                 }
             }
             .frame(width: 14)

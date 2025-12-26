@@ -75,9 +75,14 @@ xcrun simctl spawn booted log show --predicate 'subsystem == "com.clauntty"' --l
 # Screenshot
 xcrun simctl io booted screenshot /tmp/clauntty.png
 
-# Parse crash reports
+# Parse crash reports (simulator)
 uv run scripts/parse_crash.py --latest        # Formatted view
 uv run scripts/parse_crash.py --raw --latest  # Raw stack trace
+
+# Pull crash reports from physical iPhone
+idevicecrashreport -e /tmp/clauntty_crashes   # Pull all crashes to folder
+ls /tmp/clauntty_crashes | grep -i clauntty   # List Clauntty crashes
+uv run scripts/parse_crash.py /tmp/clauntty_crashes/Clauntty-YYYY-MM-DD-HHMMSS.ips
 ```
 
 ## GhosttyKit API
@@ -126,6 +131,7 @@ The `ghostty_surface_write_pty_output` function feeds data directly to the termi
 - [ ] Host key verification
 - [ ] Multiple sessions/tabs
 - [ ] rtach integration (session persistence)
+- [ ] Extract rtach protocol parsing to separate Swift module (enables fast unit tests without simulator)
 
 ## rtach Integration
 
@@ -259,6 +265,64 @@ xcrun simctl io booted screenshot Tests/Golden/terminal_empty.png
 Store goldens in `Tests/Golden/` (e.g., `terminal_empty.png`, `terminal_colors.png`).
 
 **Note**: Metal rendering only works in simulator, not headless XCTest.
+
+## Terminal Text Capture (Render Testing)
+
+Programmatically capture and compare terminal text to detect rendering bugs (blank screens, missing content).
+
+### URL Scheme
+
+The app registers `clauntty://` URL scheme:
+- `clauntty://dump-text` - Captures visible terminal text to `/tmp/clauntty_dump.txt`
+
+### sim.sh Commands
+
+```bash
+# Capture terminal text to file
+./scripts/sim.sh capture-text [output_file]
+
+# Compare two captures
+./scripts/sim.sh diff-text [file1] [file2]
+
+# Verify render isn't broken (checks for blank screen)
+./scripts/sim.sh verify-render [min_lines]
+
+# Full tab switch render test
+./scripts/sim.sh test-tab-switch
+```
+
+### Test Tab Switching Rendering
+
+```bash
+# Setup: Open 2 tabs
+./scripts/sim.sh debug devbox --tabs "0,new" --wait 5
+
+# Run the full test (capture, switch, compare)
+./scripts/sim.sh test-tab-switch
+
+# Or manually:
+./scripts/sim.sh capture-text /tmp/before.txt
+./scripts/sim.sh tap-tab 2 2 && sleep 1
+./scripts/sim.sh tap-tab 1 2 && sleep 1
+./scripts/sim.sh capture-text /tmp/after.txt
+./scripts/sim.sh diff-text /tmp/before.txt /tmp/after.txt
+```
+
+### How It Works
+
+1. `captureVisibleText()` in `TerminalSurfaceView` uses Ghostty's `ghostty_surface_read_text()` API
+2. URL scheme triggers via `xcrun simctl openurl booted "clauntty://dump-text"`
+3. Active terminal captures text and writes to `/tmp/clauntty_dump.txt`
+4. sim.sh reads the file from simulator filesystem
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `Clauntty/Core/Terminal/TerminalSurface.swift` | `captureVisibleText()` method |
+| `Clauntty/ClaunttyApp.swift` | URL scheme handler |
+| `Clauntty/Info.plist` | URL scheme registration |
+| `scripts/sim.sh` | CLI commands for capture/diff/verify |
 
 ## SSH Testing
 
@@ -400,11 +464,6 @@ Open multiple tabs for testing tab switching and rendering:
 ./scripts/sim.sh ui button          # Filter to elements matching "button"
 ./scripts/sim.sh ui "Docker"        # Filter to elements matching "Docker"
 
-# Convenience taps (pre-defined UI locations)
-./scripts/sim.sh tap-add            # Tap Add button
-./scripts/sim.sh tap-first-connection
-./scripts/sim.sh tap-terminal       # Focus terminal
-./scripts/sim.sh tap-close          # Tap back/close
 ```
 
 ### Test Sequences

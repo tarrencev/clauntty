@@ -320,6 +320,7 @@ struct EdgeSwipeGestureView: UIViewRepresentable {
 }
 
 /// UIView subclass that handles edge swipe gestures with interactive feedback
+/// Uses UIScreenEdgePanGestureRecognizer to allow text selection near edges
 class EdgeSwipeUIView: UIView {
     var screenWidth: CGFloat = 0
     var edgeThreshold: CGFloat = 30
@@ -328,86 +329,92 @@ class EdgeSwipeUIView: UIView {
     var onDragProgress: ((CGFloat) -> Void)?
     var onDragEnd: ((Bool) -> Void)?
 
-    private var touchStartX: CGFloat = 0
-    private var touchStartedFromEdge: Bool = false
-    private var isLeftEdge: Bool = false
-    private var hasStartedDrag: Bool = false
+    private var leftEdgeGesture: UIScreenEdgePanGestureRecognizer!
+    private var rightEdgeGesture: UIScreenEdgePanGestureRecognizer!
 
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        // Only handle touches that start near the edges
-        let isNearLeftEdge = point.x < edgeThreshold
-        let isNearRightEdge = point.x > bounds.width - edgeThreshold
-
-        if isNearLeftEdge || isNearRightEdge {
-            return self
-        }
-
-        // Pass through touches in the center
-        return nil
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupGestures()
     }
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first else { return }
-        let location = touch.location(in: self)
-
-        touchStartX = location.x
-        isLeftEdge = location.x < edgeThreshold
-        touchStartedFromEdge = isLeftEdge || location.x > bounds.width - edgeThreshold
-        hasStartedDrag = false
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupGestures()
     }
 
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first, touchStartedFromEdge else { return }
+    private func setupGestures() {
+        // Left edge swipe (swipe right to go back)
+        leftEdgeGesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
+        leftEdgeGesture.edges = .left
+        leftEdgeGesture.cancelsTouchesInView = true
+        leftEdgeGesture.delaysTouchesBegan = false
+        addGestureRecognizer(leftEdgeGesture)
 
-        let location = touch.location(in: self)
-        let deltaX = location.x - touchStartX
+        // Right edge swipe (swipe left for next tab)
+        rightEdgeGesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleEdgePan(_:)))
+        rightEdgeGesture.edges = .right
+        rightEdgeGesture.cancelsTouchesInView = true
+        rightEdgeGesture.delaysTouchesBegan = false
+        addGestureRecognizer(rightEdgeGesture)
+    }
 
-        // Check if we're swiping in the correct direction
-        let isValidSwipe = (isLeftEdge && deltaX > 0) || (!isLeftEdge && deltaX < 0)
-
-        if isValidSwipe {
-            if !hasStartedDrag {
-                hasStartedDrag = true
-                onDragStart?(isLeftEdge)
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Add gestures to window so they work even when our hitTest returns nil
+        if let window = window {
+            // Remove from self and add to window for proper edge detection
+            if let left = leftEdgeGesture {
+                removeGestureRecognizer(left)
+                window.addGestureRecognizer(left)
             }
-            onDragProgress?(deltaX)
+            if let right = rightEdgeGesture {
+                removeGestureRecognizer(right)
+                window.addGestureRecognizer(right)
+            }
         }
     }
 
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let touch = touches.first, touchStartedFromEdge else {
-            resetState()
-            return
+    override func willMove(toWindow newWindow: UIWindow?) {
+        // Clean up gestures from old window
+        if let oldWindow = window, newWindow == nil {
+            if let left = leftEdgeGesture {
+                oldWindow.removeGestureRecognizer(left)
+            }
+            if let right = rightEdgeGesture {
+                oldWindow.removeGestureRecognizer(right)
+            }
         }
-
-        let location = touch.location(in: self)
-        let deltaX = location.x - touchStartX
-
-        // Determine if swipe should complete the transition
-        let shouldComplete: Bool
-        if isLeftEdge {
-            shouldComplete = deltaX > swipeThreshold
-        } else {
-            shouldComplete = deltaX < -swipeThreshold
-        }
-
-        if hasStartedDrag {
-            onDragEnd?(shouldComplete)
-        }
-
-        resetState()
+        super.willMove(toWindow: newWindow)
     }
 
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if hasStartedDrag {
-            onDragEnd?(false)
+    @objc private func handleEdgePan(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        let translation = gesture.translation(in: self.window)
+        let isLeftEdge = gesture.edges == .left
+
+        switch gesture.state {
+        case .began:
+            onDragStart?(isLeftEdge)
+
+        case .changed:
+            onDragProgress?(translation.x)
+
+        case .ended, .cancelled:
+            let shouldComplete: Bool
+            if isLeftEdge {
+                shouldComplete = translation.x > swipeThreshold
+            } else {
+                shouldComplete = translation.x < -swipeThreshold
+            }
+            onDragEnd?(gesture.state == .ended && shouldComplete)
+
+        default:
+            break
         }
-        resetState()
     }
 
-    private func resetState() {
-        touchStartedFromEdge = false
-        hasStartedDrag = false
+    // Pass all touches through - edge gestures are on the window
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        return nil
     }
 }
 

@@ -80,8 +80,11 @@ class SessionManager: ObservableObject {
         return session
     }
 
-    /// Whether to use rtach for session persistence (can be disabled for debugging)
-    var useRtach: Bool = true
+    /// Whether to use rtach for session persistence
+    /// Reads from UserDefaults, defaults to true
+    var useRtach: Bool {
+        UserDefaults.standard.object(forKey: "sessionManagementEnabled") as? Bool ?? true
+    }
 
     /// Cache of RtachDeployer per connection (for session listing)
     private var rtachDeployers: [String: RtachDeployer] = [:]
@@ -195,6 +198,9 @@ class SessionManager: ObservableObject {
         }
 
         Logger.clauntty.info("SessionManager: session \(session.id.uuidString.prefix(8)) connected and attached")
+
+        // Request notification permission on first session connect
+        await NotificationManager.shared.requestAuthorizationIfNeeded()
     }
 
     /// Close a session

@@ -42,14 +42,19 @@ class RtachDeployer {
 
     /// Expected rtach version - must match rtach's version constant
     /// Increment this when rtach is updated to force redeployment
-    /// 1.4.0 - Added shell integration (OSC 133) for input detection
+    /// 1.4.0 - Added shell integration (env var only)
     /// 1.4.1 - Fixed SIGWINCH handling to check on every loop iteration
     /// 1.5.0 - Limit initial scrollback to 16KB for faster reconnects
     /// 1.6.0 - Add request_scrollback for on-demand old scrollback loading
     /// 1.6.1 - Fix ResponseHeader padding (use packed struct for exact 5-byte header)
     /// 1.7.0 - Add client_id to attach packet to prevent duplicate connections from same device
     /// 1.8.0 - Skip scrollback on attach when in alternate screen mode (fixes TUI app corruption)
-    static let expectedVersion = "1.8.0"
+    /// 1.8.1 - Remove OSC 133 from shell integration (caused resize bugs in Ghostty)
+    /// 1.8.2 - Track and restore cursor visibility state on reconnect (fixes dual cursor in Claude Code)
+    /// 1.8.3 - Performance: ReleaseFast, writev for scrollback, debug logs in hot paths
+    /// 1.8.4 - Explicit SIGWINCH to process group on window size change (fixes TUI redraw)
+    /// 1.9.0 - Command pipe: scripts write to $RTACH_CMD_FD to send commands to Clauntty
+    static let expectedVersion = "1.9.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -242,33 +247,9 @@ class RtachDeployer {
         Logger.clauntty.info("Helper scripts deployed (forward-port, open-tab)")
     }
 
-    // MARK: - Claude Code Hooks
+    // MARK: - Claude Code Settings
 
-    /// The Stop hook emits OSC 133;A when Claude finishes responding (prompt displayed)
-    private static let claunttyStopHook: [String: Any] = [
-        "hooks": [
-            [
-                "type": "command",
-                "command": "printf '\\e]133;A\\a' > /dev/tty"
-            ]
-        ]
-    ]
-
-    /// The UserPromptSubmit hook emits OSC 133;B when user submits input (command started)
-    private static let claunttyPromptSubmitHook: [String: Any] = [
-        "hooks": [
-            [
-                "type": "command",
-                "command": "printf '\\e]133;B\\a' > /dev/tty"
-            ]
-        ]
-    ]
-
-    /// Deploy Claude Code hooks and settings (merges with existing settings)
-    /// - Stop hook: sends 133;A (prompt displayed, waiting for input)
-    /// - UserPromptSubmit hook: sends 133;B (command started, processing)
-    /// - env.PATH: adds ~/.clauntty/bin to PATH for helper scripts
-    /// - permissions.allow: allows forward-port and open-tab commands
+    /// Deploy Claude Code settings (PATH and permissions for helper scripts)
     private func deployClaudeHook() async throws {
         // Read existing settings
         let output = try await connection.executeCommand(
@@ -284,28 +265,6 @@ class RtachDeployer {
         }
 
         var needsUpdate = false
-
-        // Check if our hooks already exist
-        let (hasStop, hasPromptSubmit) = hasClaudeHooks(in: settings)
-
-        // Merge our hooks into settings
-        var hooks = settings["hooks"] as? [String: Any] ?? [:]
-
-        if !hasStop {
-            var stopHooks = hooks["Stop"] as? [[String: Any]] ?? []
-            stopHooks.append(Self.claunttyStopHook)
-            hooks["Stop"] = stopHooks
-            needsUpdate = true
-        }
-
-        if !hasPromptSubmit {
-            var promptSubmitHooks = hooks["UserPromptSubmit"] as? [[String: Any]] ?? []
-            promptSubmitHooks.append(Self.claunttyPromptSubmitHook)
-            hooks["UserPromptSubmit"] = promptSubmitHooks
-            needsUpdate = true
-        }
-
-        settings["hooks"] = hooks
 
         // Add PATH for helper scripts (Claude sessions only)
         var env = settings["env"] as? [String: String] ?? [:]
@@ -333,53 +292,10 @@ class RtachDeployer {
 
         if needsUpdate {
             try await writeClaudeSettings(settings)
-            Logger.clauntty.info("Claude Code settings deployed (hooks, env, permissions)")
+            Logger.clauntty.info("Claude Code settings deployed (env, permissions)")
         } else {
             Logger.clauntty.info("Claude Code settings already configured")
         }
-    }
-
-    /// Check if our OSC 133 hooks are already present
-    /// Returns (hasStopHook, hasPromptSubmitHook)
-    private func hasClaudeHooks(in settings: [String: Any]) -> (Bool, Bool) {
-        guard let hooks = settings["hooks"] as? [String: Any] else {
-            return (false, false)
-        }
-
-        var hasStop = false
-        var hasPromptSubmit = false
-
-        // Check Stop hooks for 133;A
-        if let stopHooks = hooks["Stop"] as? [[String: Any]] {
-            for hookEntry in stopHooks {
-                if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
-                    for hook in innerHooks {
-                        if let command = hook["command"] as? String,
-                           command.contains("133;A") {
-                            hasStop = true
-                            break
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check UserPromptSubmit hooks for 133;B
-        if let promptSubmitHooks = hooks["UserPromptSubmit"] as? [[String: Any]] {
-            for hookEntry in promptSubmitHooks {
-                if let innerHooks = hookEntry["hooks"] as? [[String: Any]] {
-                    for hook in innerHooks {
-                        if let command = hook["command"] as? String,
-                           command.contains("133;B") {
-                            hasPromptSubmit = true
-                            break
-                        }
-                    }
-                }
-            }
-        }
-
-        return (hasStop, hasPromptSubmit)
     }
 
     /// Write Claude settings to remote server
@@ -387,14 +303,10 @@ class RtachDeployer {
         // Ensure directory exists
         _ = try await connection.executeCommand("mkdir -p ~/.claude")
 
-        // Build settings with our hooks, env, and permissions if empty
+        // Build settings with env and permissions if empty
         var finalSettings = settings
         if finalSettings.isEmpty {
             finalSettings = [
-                "hooks": [
-                    "Stop": [Self.claunttyStopHook],
-                    "UserPromptSubmit": [Self.claunttyPromptSubmitHook]
-                ],
                 "env": [
                     "PATH": "$HOME/.clauntty/bin:$PATH"
                 ],

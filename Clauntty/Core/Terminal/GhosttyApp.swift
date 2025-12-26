@@ -113,6 +113,7 @@ class GhosttyApp: ObservableObject {
 
         case GHOSTTY_ACTION_SET_TITLE:
             // Extract title and route to the correct surface
+            Logger.clauntty.info("GHOSTTY_ACTION_SET_TITLE received")
             if target.tag == GHOSTTY_TARGET_SURFACE,
                let surfacePtr = target.target.surface {
                 let titlePtr = action.action.set_title.title
@@ -120,8 +121,11 @@ class GhosttyApp: ObservableObject {
                     DispatchQueue.main.async {
                         if let view = TerminalSurfaceView.find(surface: surfacePtr) {
                             view.title = title
+                            let hasCallback = view.onTitleChanged != nil
+                            Logger.clauntty.info("Title set: '\(title.prefix(30))', onTitleChanged=\(hasCallback)")
                             view.onTitleChanged?(title)
-                            Logger.clauntty.debug("Title set: \(title.prefix(30))")
+                        } else {
+                            Logger.clauntty.warning("SET_TITLE: TerminalSurfaceView.find returned nil!")
                         }
                     }
                 }

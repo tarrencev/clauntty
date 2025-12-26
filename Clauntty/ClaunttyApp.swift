@@ -1,5 +1,6 @@
 import SwiftUI
 import GhosttyKit
+import UserNotifications
 import os.log
 
 /// Initializes GhosttyKit global state - must be called before any other GhosttyKit functions
@@ -117,15 +118,101 @@ struct ClaunttyApp: App {
         }
 
         _appState = StateObject(wrappedValue: initialState)
+
+        // Set up notification delegate
+        UNUserNotificationCenter.current().delegate = NotificationManager.shared
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppContentView(sessionManager: sessionManager)
                 .environmentObject(connectionStore)
                 .environmentObject(appState)
                 .environmentObject(ghosttyApp)
                 .environmentObject(sessionManager)
+                .onOpenURL { url in
+                    handleURL(url)
+                }
+        }
+    }
+
+    /// Handle custom URL schemes for testing/debugging
+    /// - clauntty://dump-text - Dump visible terminal text to /tmp/clauntty_dump.txt
+    private func handleURL(_ url: URL) {
+        Logger.clauntty.info("Received URL: \(url.absoluteString)")
+
+        guard url.scheme == "clauntty" else {
+            Logger.clauntty.warning("Unknown URL scheme: \(url.scheme ?? "nil")")
+            return
+        }
+
+        switch url.host {
+        case "dump-text":
+            dumpTerminalText()
+        default:
+            Logger.clauntty.warning("Unknown URL command: \(url.host ?? "nil")")
+        }
+    }
+
+    /// Dump the active terminal's visible text to /tmp/clauntty_dump.txt
+    private func dumpTerminalText() {
+        // Post notification to request text capture from active terminal
+        NotificationCenter.default.post(name: .captureTerminalText, object: nil)
+    }
+}
+
+// MARK: - Notification Names
+
+extension Notification.Name {
+    /// Request to capture terminal text (handled by TerminalView)
+    static let captureTerminalText = Notification.Name("captureTerminalText")
+}
+
+/// Wrapper view that handles scenePhase changes and notification taps
+struct AppContentView: View {
+    @Environment(\.scenePhase) var scenePhase
+    @ObservedObject var sessionManager: SessionManager
+
+    var body: some View {
+        ContentView()
+            .onChange(of: scenePhase) { _, newPhase in
+                handleScenePhaseChange(newPhase)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .switchToSession)) { notification in
+                handleSwitchToSession(notification)
+            }
+    }
+
+    private func handleScenePhaseChange(_ phase: ScenePhase) {
+        switch phase {
+        case .background:
+            NotificationManager.shared.appIsBackgrounded = true
+            // Request background time to continue processing SSH data
+            // This gives us ~30 seconds to detect when Claude finishes
+            NotificationManager.shared.startBackgroundTask()
+        case .active:
+            NotificationManager.shared.appIsBackgrounded = false
+            NotificationManager.shared.clearAllPendingNotifications()
+            NotificationManager.shared.endBackgroundTask()
+            // Process any pending session switch from notification tap
+            NotificationManager.shared.processPendingSessionSwitch()
+        case .inactive:
+            // Transitional state, don't change background flag
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleSwitchToSession(_ notification: Notification) {
+        guard let sessionId = notification.userInfo?["sessionId"] as? UUID else { return }
+
+        // Find and switch to the session
+        if let session = sessionManager.sessions.first(where: { $0.id == sessionId }) {
+            sessionManager.switchTo(session)
+            Logger.clauntty.info("Switched to session from notification: \(sessionId.uuidString.prefix(8))")
+        } else {
+            Logger.clauntty.warning("Session not found for notification: \(sessionId.uuidString.prefix(8))")
         }
     }
 }

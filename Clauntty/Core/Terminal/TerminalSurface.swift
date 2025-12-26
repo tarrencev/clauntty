@@ -59,7 +59,12 @@ struct TerminalSurface: UIViewRepresentable {
         view.onTextInput = onTextInput
         view.onTerminalSizeChanged = onTerminalSizeChanged
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        onSurfaceReady?(view)
+
+        // Store in coordinator so we can call onSurfaceReady in updateUIView
+        // (calling it here doesn't work because SwiftUI @State updates don't
+        // take effect from within makeUIView closures)
+        context.coordinator.surfaceView = view
+
         return view
     }
 
@@ -70,6 +75,13 @@ struct TerminalSurface: UIViewRepresentable {
 
         // Handle focus changes when active state changes
         uiView.setActive(isActive)
+
+        // Call onSurfaceReady on first update (when coordinator.surfaceView is set but not yet notified)
+        // This ensures SwiftUI state updates work properly
+        if let surface = context.coordinator.surfaceView {
+            context.coordinator.surfaceView = nil  // Only call once
+            onSurfaceReady?(surface)
+        }
     }
 
     func makeCoordinator() -> Coordinator {
@@ -78,6 +90,8 @@ struct TerminalSurface: UIViewRepresentable {
 
     class Coordinator: NSObject {
         var parent: TerminalSurface
+        /// Store reference to surface view for passing back to SwiftUI
+        var surfaceView: TerminalSurfaceView?
 
         init(_ parent: TerminalSurface) {
             self.parent = parent
@@ -650,19 +664,74 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Reference to Ghostty's IOSurfaceLayer for frame updates
     private var ghosttySublayer: CALayer?
 
+    /// Track previous bounds to detect rotation
+    private var lastBounds: CGRect = .zero
+
     // MARK: - Layout
 
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        Logger.clauntty.debug("layoutSubviews: bounds=\(NSCoder.string(for: self.bounds))")
+        let boundsStr = "\(Int(bounds.width))x\(Int(bounds.height))"
+        let lastBoundsStr = "\(Int(lastBounds.width))x\(Int(lastBounds.height))"
+        Logger.clauntty.info("layoutSubviews: bounds=\(boundsStr), lastBounds=\(lastBoundsStr), keyboardHeight=\(Int(self.keyboardHeight))")
+
+        // Detect rotation (aspect ratio flip)
+        let rotated = detectRotation(from: lastBounds, to: bounds)
+        lastBounds = bounds
 
         // Account for keyboard when calculating effective size
         let effectiveSize = CGSize(
             width: bounds.width,
             height: bounds.height - keyboardHeight
         )
+        Logger.clauntty.info("layoutSubviews: effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), rotated=\(rotated)")
         sizeDidChange(effectiveSize)
+
+        // After rotation, force aggressive refresh to fix viewport position
+        if rotated {
+            Logger.clauntty.info("Rotation detected, scheduling viewport reset")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                self?.handleRotationComplete()
+            }
+        }
+    }
+
+    /// Detect rotation by checking if aspect ratio flipped (portrait ↔ landscape)
+    private func detectRotation(from oldBounds: CGRect, to newBounds: CGRect) -> Bool {
+        guard oldBounds.width > 0 && oldBounds.height > 0 else { return false }
+        guard newBounds.width > 0 && newBounds.height > 0 else { return false }
+        let wasPortrait = oldBounds.height > oldBounds.width
+        let isPortrait = newBounds.height > newBounds.width
+        return wasPortrait != isPortrait
+    }
+
+    /// Handle rotation completion - reset viewport and force redraw
+    private func handleRotationComplete() {
+        guard let surface = self.surface else { return }
+
+        let gridSize = ghostty_surface_size(surface)
+        let scrollOffset = ghostty_surface_scrollback_offset(surface)
+        Logger.clauntty.info("handleRotationComplete: grid=\(gridSize.columns)x\(gridSize.rows), scrollOffset=\(scrollOffset), isAltScreen=\(self.isAlternateScreen), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
+
+        // For alternate screen apps (Claude Code, vim, etc.), scroll to bottom
+        // to ensure cursor and content are visible
+        if isAlternateScreen {
+            Logger.clauntty.info("handleRotationComplete: scrolling to bottom for alt screen")
+            // Scroll to bottom of viewport (0 offset = at bottom/current content)
+            ghostty_surface_mouse_scroll(surface, 0, -1000, 0)  // Large negative = scroll to bottom
+        }
+
+        // Force complete redraw
+        Logger.clauntty.info("handleRotationComplete: calling forceRedraw")
+        forceRedraw()
+
+        // Send SIGWINCH to remote app to trigger repaint
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self = self else { return }
+            Logger.clauntty.info("handleRotationComplete: sending SIGWINCH \(self.terminalSize.columns)x\(self.terminalSize.rows)")
+            self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
+        }
     }
 
     override func didMoveToWindow() {
@@ -726,7 +795,53 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             terminalSize = (newRows, newCols)
             Logger.clauntty.info("Terminal size changed, notifying SSH: \(newCols)x\(newRows)")
             onTerminalSizeChanged?(newRows, newCols)
+
+            // Force re-render after size change with slight delay
+            // Skip if already in forceRedraw (to avoid infinite loop)
+            if !isForceRedrawing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.forceRedraw()
+                }
+            }
         }
+    }
+
+    /// Flag to prevent recursive forceRedraw calls during size changes
+    private var isForceRedrawing = false
+
+    /// Force Ghostty to completely re-render the terminal.
+    /// This works by briefly changing the size, which forces Ghostty to
+    /// recalculate and redraw everything. Useful after tab switches or
+    /// reconnections where the Metal layer may have stale content.
+    func forceRedraw() {
+        guard !isForceRedrawing else {
+            Logger.clauntty.debug("forceRedraw: skipped (already redrawing)")
+            return
+        }
+        guard let surface = self.surface else { return }
+        guard bounds.width > 50 && bounds.height > 50 else { return }
+
+        isForceRedrawing = true
+        defer { isForceRedrawing = false }
+
+        let scale = window?.screen.scale ?? UIScreen.main.scale
+        // Use effective height (accounting for keyboard) to avoid size mismatch
+        let effectiveHeight = bounds.height - keyboardHeight
+        let w = UInt32(bounds.width * scale)
+        let h = UInt32(effectiveHeight * scale)
+
+        // Log state before redraw
+        let gridBefore = ghostty_surface_size(surface)
+        Logger.clauntty.info("forceRedraw: BEFORE grid=\(gridBefore.columns)x\(gridBefore.rows), effectiveSize=\(Int(self.bounds.width))x\(Int(effectiveHeight))")
+
+        // Briefly change size then restore - forces Ghostty to re-render
+        ghostty_surface_set_size(surface, w - 1, h)
+        ghostty_surface_set_size(surface, w, h)
+        ghostty_surface_refresh(surface)
+
+        // Log state after redraw
+        let gridAfter = ghostty_surface_size(surface)
+        Logger.clauntty.info("forceRedraw: AFTER grid=\(gridAfter.columns)x\(gridAfter.rows)")
     }
 
     // MARK: - Focus & Active State
@@ -749,25 +864,20 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             focusDidChange(true)
 
             // Force size update to ensure Metal layer frame is correct after tab switch
-            // This fixes rendering bugs where the last row gets clipped
             let effectiveSize = CGSize(
                 width: bounds.width,
                 height: bounds.height - keyboardHeight
             )
             sizeDidChange(effectiveSize)
 
-            // Force ghostty to redraw the terminal content
-            // This fixes the blank screen issue when switching back to a tab
-            if let surface = self.surface {
-                ghostty_surface_refresh(surface)
-                Logger.clauntty.info("Tab active: called ghostty_surface_refresh")
-            }
+            // Force complete re-render by toggling size
+            // This fixes blank/partial screen issues when switching tabs
+            forceRedraw()
 
             // Force the remote shell to redraw by sending a SIGWINCH
             // This triggers the shell/app (like Claude Code) to repaint
-            DispatchQueue.main.async { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 guard let self = self else { return }
-                // Always send current size to force remote redraw
                 self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
                 Logger.clauntty.info("Tab active: sent SIGWINCH to force remote redraw")
             }
@@ -878,6 +988,69 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     var isAlternateScreen: Bool {
         guard let surface = self.surface else { return false }
         return ghostty_surface_is_alternate_screen(surface)
+    }
+
+    // MARK: - Text Capture (for testing)
+
+    /// Capture all visible text in the terminal viewport.
+    /// Used for automated testing to verify rendering is correct.
+    /// - Returns: The visible terminal text as a string, or nil if capture failed
+    func captureVisibleText() -> String? {
+        guard let surface = self.surface else {
+            Logger.clauntty.warning("captureVisibleText: no surface")
+            return nil
+        }
+
+        // Log terminal state for debugging
+        let gridSize = ghostty_surface_size(surface)
+        let scrollOffset = ghostty_surface_scrollback_offset(surface)
+        let isAltScreen = ghostty_surface_is_alternate_screen(surface)
+
+        // Get cursor position
+        var cursorX: Double = 0
+        var cursorY: Double = 0
+        var cursorW: Double = 0
+        var cursorH: Double = 0
+        ghostty_surface_ime_point(surface, &cursorX, &cursorY, &cursorW, &cursorH)
+
+        Logger.clauntty.info("captureVisibleText: grid=\(gridSize.columns)x\(gridSize.rows), scrollOffset=\(scrollOffset), altScreen=\(isAltScreen), cursor=(\(Int(cursorX)),\(Int(cursorY))), bounds=\(Int(self.bounds.width))x\(Int(self.bounds.height))")
+
+        // Create selection spanning entire visible viewport
+        var sel = ghostty_selection_s()
+        sel.top_left.tag = GHOSTTY_POINT_VIEWPORT
+        sel.top_left.coord = GHOSTTY_POINT_COORD_TOP_LEFT
+        sel.top_left.x = 0
+        sel.top_left.y = 0
+        sel.bottom_right.tag = GHOSTTY_POINT_VIEWPORT
+        sel.bottom_right.coord = GHOSTTY_POINT_COORD_BOTTOM_RIGHT
+        sel.bottom_right.x = 0
+        sel.bottom_right.y = 0
+        sel.rectangle = false
+
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_text(surface, sel, &text) else {
+            Logger.clauntty.warning("captureVisibleText: ghostty_surface_read_text failed")
+            return nil
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        guard let ptr = text.text, text.text_len > 0 else {
+            Logger.clauntty.info("captureVisibleText: empty text")
+            return ""
+        }
+
+        let result = String(cString: ptr)
+        let lines = result.components(separatedBy: "\n")
+        Logger.clauntty.info("captureVisibleText: captured \(result.count) chars, lines=\(lines.count)")
+
+        // Log last few lines to see what's at the bottom
+        let lastLines = lines.suffix(3)
+        for (i, line) in lastLines.enumerated() {
+            let truncated = line.prefix(60)
+            Logger.clauntty.info("captureVisibleText: line[\(lines.count - 3 + i)]: '\(truncated)'\(line.count > 60 ? "..." : "")")
+        }
+
+        return result
     }
 
     // MARK: - UIKeyInput

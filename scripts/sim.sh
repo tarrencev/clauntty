@@ -229,11 +229,6 @@ EOF
         $0 tap 360 60
         ;;
 
-    tap-first-connection)
-        # Tap the first connection in the list
-        $0 tap 196 180
-        ;;
-
     tap-terminal)
         # Tap center of terminal to focus/show keyboard
         $0 tap 196 450
@@ -661,6 +656,345 @@ for i, conn in enumerate(connections, 1):
 PYTHON
         ;;
 
+    # MARK: - Rotation
+
+    rotate-left|rl)
+        # Rotate simulator left (landscape)
+        echo -e "${BLUE}Rotating left...${NC}"
+        osascript -e '
+tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    keystroke (ASCII character 28) using {command down}
+end tell
+'
+        sleep 0.5
+        echo -e "${GREEN}Rotated left${NC}"
+        ;;
+
+    rotate-right|rr)
+        # Rotate simulator right (landscape)
+        echo -e "${BLUE}Rotating right...${NC}"
+        osascript -e '
+tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    keystroke (ASCII character 29) using {command down}
+end tell
+'
+        sleep 0.5
+        echo -e "${GREEN}Rotated right${NC}"
+        ;;
+
+    rotate|rot)
+        # Rotate to specific orientation
+        # Usage: rotate <portrait|landscape|left|right>
+        orientation="${2:-landscape}"
+        case "$orientation" in
+            left|l)
+                $0 rotate-left
+                ;;
+            right|r)
+                $0 rotate-right
+                ;;
+            portrait|p)
+                # Rotate twice to get back to portrait (or use specific key)
+                echo -e "${BLUE}Rotating to portrait...${NC}"
+                # Cmd+Up = portrait
+                osascript -e '
+tell application "Simulator" to activate
+delay 0.2
+tell application "System Events"
+    keystroke (ASCII character 30) using {command down}
+end tell
+'
+                sleep 0.5
+                echo -e "${GREEN}Rotated to portrait${NC}"
+                ;;
+            landscape|land)
+                $0 rotate-left
+                ;;
+            *)
+                echo -e "${RED}Unknown orientation: $orientation (use: portrait, landscape, left, right)${NC}"
+                exit 1
+                ;;
+        esac
+        ;;
+
+    # MARK: - Terminal Text Capture (for render testing)
+
+    capture-text|ct)
+        # Capture visible terminal text to a file
+        # Usage: capture-text [output_file]
+        udid=$(ensure_ready)
+        output_file="${2:-/tmp/clauntty_capture.txt}"
+
+        echo -e "${BLUE}Triggering text capture...${NC}"
+
+        # Trigger capture via URL scheme
+        xcrun simctl openurl booted "clauntty://dump-text"
+        sleep 0.5
+
+        # Find the app's Documents directory in the simulator
+        app_container=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application -name "clauntty_dump.txt" -exec dirname {} \; 2>/dev/null | head -1)
+        if [ -z "$app_container" ]; then
+            # Try to find by bundle ID
+            app_container=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application -name ".com.apple.mobile_container_manager.metadata.plist" -exec sh -c 'grep -l "com.clauntty.app" "$1" 2>/dev/null && dirname "$1"' _ {} \; 2>/dev/null | head -1)
+            if [ -n "$app_container" ]; then
+                app_container="$app_container/Documents"
+            fi
+        fi
+
+        sim_file=""
+        if [ -n "$app_container" ]; then
+            sim_file="$app_container/clauntty_dump.txt"
+        fi
+
+        # Fallback: search directly
+        if [ -z "$sim_file" ] || [ ! -f "$sim_file" ]; then
+            sim_file=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid" -name "clauntty_dump.txt" 2>/dev/null | head -1)
+        fi
+
+        if [ -n "$sim_file" ] && [ -f "$sim_file" ]; then
+            cp "$sim_file" "$output_file"
+            lines=$(wc -l < "$output_file" | tr -d ' ')
+            chars=$(wc -c < "$output_file" | tr -d ' ')
+            echo -e "${GREEN}Captured to: $output_file ($lines lines, $chars chars)${NC}"
+        else
+            echo -e "${RED}Capture failed - dump file not found${NC}"
+            exit 1
+        fi
+        ;;
+
+    diff-text|dt)
+        # Compare two terminal text captures
+        # Usage: diff-text [file1] [file2]
+        file1="${2:-/tmp/clauntty_before.txt}"
+        file2="${3:-/tmp/clauntty_after.txt}"
+
+        if [ ! -f "$file1" ]; then
+            echo -e "${RED}File not found: $file1${NC}"
+            exit 1
+        fi
+        if [ ! -f "$file2" ]; then
+            echo -e "${RED}File not found: $file2${NC}"
+            exit 1
+        fi
+
+        if diff -q "$file1" "$file2" > /dev/null 2>&1; then
+            echo -e "${GREEN}✓ No differences${NC}"
+        else
+            echo -e "${RED}✗ Differences found:${NC}"
+            diff --color=always "$file1" "$file2" || true
+        fi
+        ;;
+
+    verify-render|vr)
+        # Verify terminal rendering is not broken
+        # Usage: verify-render [min_lines]
+        min_lines="${2:-10}"
+        tmp_file="/tmp/clauntty_verify.txt"
+
+        $0 capture-text "$tmp_file"
+
+        if [ ! -s "$tmp_file" ]; then
+            echo -e "${RED}✗ FAIL: Empty terminal (blank screen)${NC}"
+            exit 1
+        fi
+
+        lines=$(wc -l < "$tmp_file" | tr -d ' ')
+        if [ "$lines" -lt "$min_lines" ]; then
+            echo -e "${YELLOW}⚠ WARNING: Only $lines lines (expected >= $min_lines)${NC}"
+        fi
+
+        # Check for prompt character
+        if grep -q '[$#>]' "$tmp_file"; then
+            echo -e "${GREEN}✓ Prompt visible${NC}"
+        else
+            echo -e "${YELLOW}⚠ No prompt character found${NC}"
+        fi
+
+        echo -e "${GREEN}✓ Render check passed ($lines lines)${NC}"
+        ;;
+
+    test-tab-switch|tts)
+        # Test tab switching rendering
+        # Usage: test-tab-switch
+        echo -e "${BLUE}=== Tab Switch Render Test ===${NC}"
+
+        # Capture tab 1 before
+        echo -e "${BLUE}[1/4] Capturing tab 1 (before)...${NC}"
+        $0 capture-text /tmp/clauntty_tab1_before.txt
+
+        # Switch to tab 2
+        echo -e "${BLUE}[2/4] Switching to tab 2...${NC}"
+        $0 tap-tab 2 2
+        sleep 1
+        $0 verify-render
+
+        # Switch back to tab 1
+        echo -e "${BLUE}[3/4] Switching back to tab 1...${NC}"
+        $0 tap-tab 1 2
+        sleep 1
+
+        # Capture tab 1 after
+        echo -e "${BLUE}[4/4] Capturing tab 1 (after)...${NC}"
+        $0 capture-text /tmp/clauntty_tab1_after.txt
+
+        # Compare
+        echo -e "${BLUE}Comparing before/after...${NC}"
+        $0 diff-text /tmp/clauntty_tab1_before.txt /tmp/clauntty_tab1_after.txt
+
+        echo -e "${GREEN}=== Test Complete ===${NC}"
+        ;;
+
+    test-rotation|tr)
+        # Test rendering after rotation
+        # Usage: test-rotation
+        echo -e "${BLUE}=== Rotation Render Test ===${NC}"
+
+        # Capture in portrait
+        echo -e "${BLUE}[1/5] Ensuring portrait mode...${NC}"
+        $0 rotate portrait
+        sleep 1
+
+        echo -e "${BLUE}[2/5] Capturing portrait...${NC}"
+        $0 capture-text /tmp/clauntty_portrait.txt
+        $0 verify-render
+
+        # Rotate to landscape
+        echo -e "${BLUE}[3/5] Rotating to landscape...${NC}"
+        $0 rotate landscape
+        sleep 1
+
+        echo -e "${BLUE}[4/5] Verifying landscape render...${NC}"
+        $0 verify-render
+
+        # Rotate back to portrait
+        echo -e "${BLUE}[5/5] Rotating back to portrait...${NC}"
+        $0 rotate portrait
+        sleep 1
+
+        # Capture and compare
+        $0 capture-text /tmp/clauntty_portrait_after.txt
+
+        echo -e "${BLUE}Comparing portrait before/after rotation cycle...${NC}"
+        $0 diff-text /tmp/clauntty_portrait.txt /tmp/clauntty_portrait_after.txt
+
+        echo -e "${GREEN}=== Rotation Test Complete ===${NC}"
+        ;;
+
+    test-rotation-stress|trs)
+        # Stress test: multiple rotations with text capture after each
+        # Usage: test-rotation-stress [connection] [rotations]
+        # Example: test-rotation-stress devbox 5
+        connection="${2:-}"
+        rotations="${3:-4}"
+
+        echo -e "${BLUE}=== Rotation Stress Test ===${NC}"
+        echo -e "Rotations: $rotations"
+        echo ""
+
+        # Build and launch if connection provided
+        if [ -n "$connection" ]; then
+            echo -e "${BLUE}[Setup] Building and launching with connection: $connection${NC}"
+            $0 debug "$connection" --wait 5 --no-logs
+        fi
+
+        # Ensure portrait mode to start
+        echo -e "${BLUE}[Setup] Starting in portrait mode...${NC}"
+        $0 rotate portrait
+        sleep 1
+
+        # Capture baseline
+        echo -e "${BLUE}[Baseline] Capturing initial terminal state...${NC}"
+        $0 capture-text /tmp/clauntty_rotation_baseline.txt
+        baseline_lines=$(wc -l < /tmp/clauntty_rotation_baseline.txt | tr -d ' ')
+        baseline_chars=$(wc -c < /tmp/clauntty_rotation_baseline.txt | tr -d ' ')
+        echo -e "${GREEN}Baseline: $baseline_lines lines, $baseline_chars chars${NC}"
+        echo ""
+        echo -e "${YELLOW}--- Baseline Text ---${NC}"
+        cat /tmp/clauntty_rotation_baseline.txt
+        echo -e "${YELLOW}--- End Baseline ---${NC}"
+        echo ""
+
+        # Track failures
+        failures=0
+
+        # Rotation cycle
+        for i in $(seq 1 $rotations); do
+            echo -e "${BLUE}[Rotation $i/$rotations]${NC}"
+
+            # Alternate between landscape and portrait
+            if [ $((i % 2)) -eq 1 ]; then
+                orientation="Landscape"
+                $0 rotate landscape 2>/dev/null
+            else
+                orientation="Portrait"
+                $0 rotate portrait 2>/dev/null
+            fi
+            sleep 2  # Wait for Ghostty to finish re-rendering
+
+            # Capture and verify
+            capture_file="/tmp/clauntty_rotation_$i.txt"
+            $0 capture-text "$capture_file" 2>/dev/null
+
+            current_lines=$(wc -l < "$capture_file" | tr -d ' ')
+            current_chars=$(wc -c < "$capture_file" | tr -d ' ')
+
+            # Check for significant text loss (>20% fewer chars)
+            threshold=$((baseline_chars * 80 / 100))
+            if [ "$current_chars" -lt "$threshold" ]; then
+                echo -e "  → $orientation: ${RED}FAIL: $current_lines lines, $current_chars chars (lost >20%)${NC}"
+                failures=$((failures + 1))
+            elif [ "$current_chars" -lt "$baseline_chars" ]; then
+                echo -e "  → $orientation: ${YELLOW}WARN: $current_lines lines, $current_chars chars${NC}"
+            else
+                echo -e "  → $orientation: ${GREEN}OK: $current_lines lines, $current_chars chars${NC}"
+            fi
+
+            # Always show the captured text
+            echo -e "${YELLOW}--- $orientation Text ---${NC}"
+            cat "$capture_file"
+            echo ""
+            echo -e "${YELLOW}--- End ---${NC}"
+            echo ""
+        done
+
+        # Return to portrait
+        echo ""
+        echo -e "${BLUE}[Cleanup] Returning to portrait...${NC}"
+        $0 rotate portrait
+        sleep 1
+
+        # Final comparison
+        echo ""
+        echo -e "${BLUE}[Final] Capturing final state...${NC}"
+        $0 capture-text /tmp/clauntty_rotation_final.txt
+        final_lines=$(wc -l < /tmp/clauntty_rotation_final.txt | tr -d ' ')
+        final_chars=$(wc -c < /tmp/clauntty_rotation_final.txt | tr -d ' ')
+
+        echo ""
+        echo -e "${BLUE}=== Results ===${NC}"
+        echo "  Baseline: $baseline_lines lines, $baseline_chars chars"
+        echo "  Final:    $final_lines lines, $final_chars chars"
+
+        # Show diff if different
+        if ! diff -q /tmp/clauntty_rotation_baseline.txt /tmp/clauntty_rotation_final.txt > /dev/null 2>&1; then
+            echo ""
+            echo -e "${YELLOW}Differences between baseline and final:${NC}"
+            diff --color=always /tmp/clauntty_rotation_baseline.txt /tmp/clauntty_rotation_final.txt || true
+        fi
+
+        echo ""
+        if [ $failures -gt 0 ]; then
+            echo -e "${RED}=== FAILED: $failures rotation(s) had significant text loss ===${NC}"
+            exit 1
+        else
+            echo -e "${GREEN}=== PASSED: All rotations maintained text ===${NC}"
+        fi
+        ;;
+
     help|*)
         cat <<EOF
 Clauntty Simulator CLI (uses IDB - runs in background, won't interrupt your work)
@@ -704,7 +1038,6 @@ Interaction (runs inside simulator):
 
 Convenience:
   tap-add                  Tap Add button
-  tap-first-connection     Tap first connection
   tap-terminal             Tap terminal center
   tap-close                Tap close/back
   tap-save                 Tap Save button
@@ -720,6 +1053,20 @@ Logs & Debugging:
   ui [filter]              List UI elements with tap coordinates
   settings                 Show saved connections from app prefs
 
+Rotation:
+  rotate|rot <orientation> Rotate to orientation (portrait, landscape, left, right)
+  rotate-left|rl           Rotate simulator left
+  rotate-right|rr          Rotate simulator right
+
+Render Testing:
+  capture-text|ct [file]   Capture terminal text to file (default: /tmp/clauntty_capture.txt)
+  diff-text|dt [f1] [f2]   Compare two text captures
+  verify-render|vr [lines] Verify terminal rendered correctly (check for blank screen)
+  test-tab-switch|tts      Full tab switch render test (capture, switch, compare)
+  test-rotation|tr         Full rotation render test (portrait -> landscape -> portrait)
+  test-rotation-stress|trs Stress test with multiple rotations, prints text each time
+                           Usage: trs [connection] [num_rotations]
+
 Examples:
   $0 debug devbox                    # Full debug cycle connecting to devbox
   $0 debug devbox --tabs "0,1"       # Open 2 existing sessions
@@ -729,6 +1076,14 @@ Examples:
   $0 tabs 3                          # Show coordinates for 3 tabs
   $0 tap-tab 2 3                     # Tap tab 2 (of 3 total)
   $0 logs 1m                         # Show last 1 minute of logs
+
+Render Testing:
+  $0 capture-text before.txt         # Capture terminal text
+  $0 tap-tab 2 2 && sleep 1          # Switch tabs
+  $0 capture-text after.txt          # Capture again
+  $0 diff-text before.txt after.txt  # Compare
+  $0 test-tab-switch                 # Or use the all-in-one test
+  $0 trs devbox 6                    # Rotation stress: 6 rotations with text output
 
 Screenshots: $SCREENSHOTS_DIR
 EOF
