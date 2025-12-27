@@ -65,8 +65,7 @@ struct TerminalView: View {
                     isActive: isActive,
                     onTextInput: { data in
                         // Send keyboard input to SSH via session
-                        let hex = data.map { String(format: "%02x", $0) }.joined(separator: " ")
-                        Logger.clauntty.info("[INPUT] onTextInput called with \(data.count) bytes: \(hex)")
+                        Logger.clauntty.verbose("[INPUT] onTextInput called with \(data.count) bytes: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
                         session.sendData(data)
                     },
                     onTerminalSizeChanged: { rows, columns in
@@ -74,7 +73,7 @@ struct TerminalView: View {
                         session.sendWindowChange(rows: rows, columns: columns)
                     },
                     onSurfaceReady: { surface in
-                        Logger.clauntty.info("onSurfaceReady called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")
+                        Logger.clauntty.debugOnly("onSurfaceReady called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")
                         surfaceHolder.surface = surface
                         connectSession(surface: surface)
                     }
@@ -85,7 +84,7 @@ struct TerminalView: View {
                     // Force re-render when session connects/reconnects
                     // This fixes blank/partial rendering after reconnection
                     if case .connected = newState {
-                        Logger.clauntty.info("Session state changed to connected, forcing redraw")
+                        Logger.clauntty.debugOnly("Session state changed to connected, forcing redraw")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             surfaceHolder.surface?.forceRedraw()
                         }
@@ -94,7 +93,7 @@ struct TerminalView: View {
                         // This fixes PTY size mismatch when auto-connect ran before surface was ready
                         if let surface = surfaceHolder.surface {
                             let size = surface.terminalSize
-                            Logger.clauntty.info("Session connected, sending window change: \(size.columns)x\(size.rows)")
+                            Logger.clauntty.debugOnly("Session connected, sending window change: \(size.columns)x\(size.rows)")
                             session.sendWindowChange(rows: size.rows, columns: size.columns)
                         }
                     }
@@ -147,7 +146,7 @@ struct TerminalView: View {
 
     /// Handle request to capture terminal text (from URL scheme)
     private func handleCaptureTerminalText(surface: TerminalSurfaceView) {
-        Logger.clauntty.info("Capturing terminal text for session \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("Capturing terminal text for session \(session.id.uuidString.prefix(8))")
 
         guard let text = surface.captureVisibleText() else {
             Logger.clauntty.error("Failed to capture terminal text")
@@ -163,14 +162,14 @@ struct TerminalView: View {
 
         do {
             try text.write(to: filePath, atomically: true, encoding: .utf8)
-            Logger.clauntty.info("Terminal text written to \(filePath.path) (\(text.count) chars)")
+            Logger.clauntty.debugOnly("Terminal text written to \(filePath.path) (\(text.count) chars)")
         } catch {
             Logger.clauntty.error("Failed to write terminal text: \(error.localizedDescription)")
         }
     }
 
     private func connectSession(surface: TerminalSurfaceView) {
-        Logger.clauntty.info("connectSession called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")
+        Logger.clauntty.debugOnly("connectSession called for session \(session.id.uuidString.prefix(8)), state=\(String(describing: session.state))")
 
         // Always wire up the display - we need this for data flow regardless of connection state
         wireSessionToSurface(surface: surface)
@@ -178,7 +177,7 @@ struct TerminalView: View {
         // If already connected, just send window change to fix terminal size
         // This handles the case where auto-connect ran before surface was ready
         if case .connected = session.state {
-            Logger.clauntty.info("connectSession: session already connected, sending window change")
+            Logger.clauntty.debugOnly("connectSession: session already connected, sending window change")
             let size = surface.terminalSize
             session.sendWindowChange(rows: size.rows, columns: size.columns)
             return
@@ -186,7 +185,7 @@ struct TerminalView: View {
 
         // If not disconnected (e.g., connecting), wait for connection to complete
         guard session.state == .disconnected else {
-            Logger.clauntty.info("connectSession: session not disconnected (state=\(String(describing: session.state))), returning")
+            Logger.clauntty.debugOnly("connectSession: session not disconnected (state=\(String(describing: session.state))), returning")
             return
         }
 
@@ -194,19 +193,19 @@ struct TerminalView: View {
         // This ensures PTY is created with correct size from the start
         let size = surface.terminalSize
         session.initialTerminalSize = (rows: Int(size.rows), columns: Int(size.columns))
-        Logger.clauntty.info("Setting initial terminal size: \(size.columns)x\(size.rows)")
+        Logger.clauntty.debugOnly("Setting initial terminal size: \(size.columns)x\(size.rows)")
 
         // Start connection via SessionManager
         Task {
             do {
                 try await sessionManager.connect(session: session, rtachSessionId: session.rtachSessionId)
-                Logger.clauntty.info("Session connected: \(session.id.uuidString.prefix(8))")
+                Logger.clauntty.debugOnly("Session connected: \(session.id.uuidString.prefix(8))")
 
                 // Force send actual terminal size immediately after connection
                 // This ensures the remote PTY has correct dimensions before user types anything
                 await MainActor.run {
                     let size = surface.terminalSize
-                    Logger.clauntty.info("Sending initial window size: \(size.columns)x\(size.rows)")
+                    Logger.clauntty.debugOnly("Sending initial window size: \(size.columns)x\(size.rows)")
                     session.sendWindowChange(rows: size.rows, columns: size.columns)
                 }
 
@@ -224,7 +223,7 @@ struct TerminalView: View {
     }
 
     private func wireSessionToSurface(surface: TerminalSurfaceView) {
-        Logger.clauntty.info("wireSessionToSurface called for session \(session.id.uuidString.prefix(8))")
+        Logger.clauntty.debugOnly("wireSessionToSurface called for session \(session.id.uuidString.prefix(8))")
 
         // Set up callback for session data → terminal display
         // Capture surface strongly - it's safe because session doesn't own the view
@@ -256,9 +255,9 @@ struct TerminalView: View {
         // Skip if on alternate screen (vim, less, Claude Code) - no scrollback there
         surface.onScrollNearTop = { [weak session, weak surface] offset in
             let isAlt = surface?.isAlternateScreen ?? true
-            Logger.clauntty.info("[SCROLL] onScrollNearTop: offset=\(offset), isAlternateScreen=\(isAlt)")
+            Logger.clauntty.verbose("[SCROLL] onScrollNearTop: offset=\(offset), isAlternateScreen=\(isAlt)")
             guard let surface = surface, !surface.isAlternateScreen else {
-                Logger.clauntty.info("[SCROLL] onScrollNearTop: skipping (alt screen or no surface)")
+                Logger.clauntty.verbose("[SCROLL] onScrollNearTop: skipping (alt screen or no surface)")
                 return
             }
             session?.loadMoreScrollbackIfNeeded()

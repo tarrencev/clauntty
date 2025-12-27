@@ -41,7 +41,7 @@ class Session: ObservableObject, Identifiable {
     /// Dynamic title set by terminal escape sequences (OSC 0/1/2)
     @Published var dynamicTitle: String? {
         didSet {
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): dynamicTitle set to '\(self.dynamicTitle ?? "nil")'")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): dynamicTitle set to '\(self.dynamicTitle ?? "nil")'")
 
             // Persist the title for session restoration
             if let title = dynamicTitle, let sessionId = rtachSessionId {
@@ -93,7 +93,7 @@ class Session: ObservableObject, Identifiable {
         if let sessionId = rtachSessionId {
             let key = Self.claudeSessionKey(connectionId: connectionConfig.id, rtachSessionId: sessionId)
             UserDefaults.standard.set(true, forKey: key)
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): marked as Claude session")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): marked as Claude session")
         }
     }
 
@@ -102,7 +102,7 @@ class Session: ObservableObject, Identifiable {
         let key = Self.claudeSessionKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId)
         _isClaudeSession = UserDefaults.standard.bool(forKey: key)
         if _isClaudeSession {
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): restored Claude session flag")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): restored Claude session flag")
         }
     }
 
@@ -118,7 +118,7 @@ class Session: ObservableObject, Identifiable {
         guard pendingNotificationCheck else { return }
 
         pendingNotificationCheck = false
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): checking pending notification, isClaudeSession=\(self.isClaudeSession)")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking pending notification, isClaudeSession=\(self.isClaudeSession)")
 
         if NotificationManager.shared.shouldNotify(for: self) {
             Task {
@@ -187,7 +187,7 @@ class Session: ObservableObject, Identifiable {
             // Only restore if we don't already have a dynamic title
             if dynamicTitle == nil {
                 dynamicTitle = savedTitle
-                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): restored title '\(savedTitle.prefix(30))'")
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): restored title '\(savedTitle.prefix(30))'")
             }
         }
     }
@@ -301,9 +301,8 @@ class Session: ObservableObject, Identifiable {
     /// Delegates to RtachSession for protocol handling (raw vs framed mode)
     func handleDataReceived(_ data: Data) {
         self.totalBytesReceived += data.count
-        // Debug: log first 32 bytes as hex
-        let preview = data.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
-        Logger.clauntty.info("[FRAME] received \(data.count) bytes (total=\(self.totalBytesReceived)), state=\(String(describing: self.rtachProtocol.state)), first32=\(preview)")
+        // Verbose: expensive hex dump of incoming data
+        Logger.clauntty.verbose("[FRAME] received \(data.count) bytes (total=\(self.totalBytesReceived)), state=\(String(describing: self.rtachProtocol.state)), first32=\(data.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " "))")
 
         // Delegate to RtachSession for protocol handling
         rtachProtocol.processIncomingData(data)
@@ -347,7 +346,7 @@ class Session: ObservableObject, Identifiable {
         if bytesInWindow >= loadingShowThreshold {
             if !isLoadingContent {
                 isLoadingContent = true
-                Logger.clauntty.info("[LOAD] Showing loading indicator (bytes in window: \(bytesInWindow))")
+                Logger.clauntty.debugOnly("[LOAD] Showing loading indicator (bytes in window: \(bytesInWindow))")
             }
 
             // Reset/restart the hide timer
@@ -372,7 +371,7 @@ class Session: ObservableObject, Identifiable {
         if bytesInWindow < 1024 {  // Less than 1KB in window
             if isLoadingContent {
                 isLoadingContent = false
-                Logger.clauntty.info("[LOAD] Hiding loading indicator (bytes in window: \(bytesInWindow))")
+                Logger.clauntty.debugOnly("[LOAD] Hiding loading indicator (bytes in window: \(bytesInWindow))")
             }
         } else {
             // Still receiving data, check again later
@@ -396,10 +395,10 @@ class Session: ObservableObject, Identifiable {
         let altScreenExit = Data([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c])  // ESC[?1049l
 
         if data.range(of: altScreenEnter) != nil {
-            Logger.clauntty.info("[ALTSCREEN] Received ESC[?1049h (switch to alternate screen) in \(data.count) bytes")
+            Logger.clauntty.debugOnly("[ALTSCREEN] Received ESC[?1049h (switch to alternate screen) in \(data.count) bytes")
         }
         if data.range(of: altScreenExit) != nil {
-            Logger.clauntty.info("[ALTSCREEN] Received ESC[?1049l (switch to normal screen) in \(data.count) bytes")
+            Logger.clauntty.debugOnly("[ALTSCREEN] Received ESC[?1049l (switch to normal screen) in \(data.count) bytes")
         }
 
         // Track loading state for showing loading indicator
@@ -439,7 +438,7 @@ class Session: ObservableObject, Identifiable {
                 onPortForwardRequested?(port)
             }
         default:
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
         }
     }
 
@@ -467,7 +466,7 @@ class Session: ObservableObject, Identifiable {
         // Inactivity-based detection: no output for 1.5s means likely waiting for input
         if !isWaitingForInput {
             isWaitingForInput = true
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): waiting for input")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): waiting for input")
             checkNotificationForWaitingInput()
         }
     }
@@ -476,7 +475,7 @@ class Session: ObservableObject, Identifiable {
     private func checkNotificationForWaitingInput() {
         // If we have title info, check notification immediately
         if dynamicTitle != nil || _isClaudeSession {
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): checking notification, isClaudeSession=\(self.isClaudeSession)")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking notification, isClaudeSession=\(self.isClaudeSession)")
             if NotificationManager.shared.shouldNotify(for: self) {
                 Task {
                     await NotificationManager.shared.scheduleInputReady(session: self)
@@ -485,15 +484,14 @@ class Session: ObservableObject, Identifiable {
         } else {
             // No title yet - wait for title to be set
             pendingNotificationCheck = true
-            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pending notification check (waiting for title)")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pending notification check (waiting for title)")
         }
     }
 
     /// Send data to remote (keyboard input)
     /// Uses rtach protocol to automatically frame when in framed mode
     func sendData(_ data: Data) {
-        let hasHandler = self.channelHandler != nil
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): sendData called with \(data.count) bytes, channelHandler=\(hasHandler ? "set" : "nil")")
+        Logger.clauntty.verbose("Session \(self.id.uuidString.prefix(8)): sendData called with \(data.count) bytes, channelHandler=\(self.channelHandler != nil ? "set" : "nil")")
         if channelHandler == nil {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): sendData called but channelHandler is nil!")
         }
@@ -524,7 +522,7 @@ class Session: ObservableObject, Identifiable {
         let size = RtachClient.WindowSize(rows: rows, cols: columns)
         rtachProtocol.sendWindowSize(size)
 
-        Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): window change \(columns)x\(rows)")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): window change \(columns)x\(rows)")
     }
 
     // MARK: - Scrollback Request
@@ -536,17 +534,17 @@ class Session: ObservableObject, Identifiable {
         // Only request scrollback after we've confirmed rtach is running (received handshake)
         // Before handshake or in raw mode, these packets would be sent to the shell as garbage input
         guard rtachProtocol.isRtachRunning else {
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): skipping scrollback request (no rtach handshake received)")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): skipping scrollback request (no rtach handshake received)")
             return
         }
 
         guard !scrollbackFullyLoaded else {
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback already fully loaded")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): scrollback already fully loaded")
             return
         }
 
         guard !scrollbackPageRequestPending else {
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback page request already pending")
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): scrollback page request already pending")
             return
         }
 
@@ -560,13 +558,13 @@ class Session: ObservableObject, Identifiable {
         // Send via rtach protocol
         rtachProtocol.requestScrollbackPage(offset: UInt32(scrollbackLoadedOffset), limit: UInt32(scrollbackPageSize))
 
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): requesting scrollback page offset=\(self.scrollbackLoadedOffset) limit=\(self.scrollbackPageSize)")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): requesting scrollback page offset=\(self.scrollbackLoadedOffset) limit=\(self.scrollbackPageSize)")
     }
 
     /// Load more scrollback if user is scrolling near the top and more is available
     /// Call this from TerminalView when user scrolls near the top of scrollback
     func loadMoreScrollbackIfNeeded() {
-        Logger.clauntty.debug("[SCROLL] loadMoreScrollbackIfNeeded called, pending=\(self.scrollbackPageRequestPending), fullyLoaded=\(self.scrollbackFullyLoaded)")
+        Logger.clauntty.verbose("[SCROLL] loadMoreScrollbackIfNeeded called, pending=\(self.scrollbackPageRequestPending), fullyLoaded=\(self.scrollbackFullyLoaded)")
         requestScrollbackPage()
     }
 
@@ -612,7 +610,7 @@ extension Session: RtachClient.RtachSessionDelegate {
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollback data: Data) {
         Task { @MainActor in
-            Logger.clauntty.info("Scrollback response complete: \(data.count) bytes")
+            Logger.clauntty.debugOnly("Scrollback response complete: \(data.count) bytes")
             self.scrollbackPageRequestPending = false
             self.onScrollbackReceived?(data)
         }
@@ -620,7 +618,7 @@ extension Session: RtachClient.RtachSessionDelegate {
 
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollbackPage meta: RtachClient.ScrollbackPageMeta, data: Data) {
         Task { @MainActor in
-            Logger.clauntty.info("Scrollback page complete: \(data.count) bytes, total=\(meta.totalLength), offset=\(meta.offset)")
+            Logger.clauntty.debugOnly("Scrollback page complete: \(data.count) bytes, total=\(meta.totalLength), offset=\(meta.offset)")
 
             self.scrollbackTotalSize = Int(meta.totalLength)
             self.scrollbackPageRequestPending = false
@@ -629,7 +627,7 @@ extension Session: RtachClient.RtachSessionDelegate {
             // Check if fully loaded
             if self.scrollbackLoadedOffset >= Int(meta.totalLength) {
                 self.scrollbackFullyLoaded = true
-                Logger.clauntty.info("Scrollback fully loaded: \(meta.totalLength) bytes total")
+                Logger.clauntty.debugOnly("Scrollback fully loaded: \(meta.totalLength) bytes total")
             }
 
             self.onScrollbackReceived?(data)
@@ -639,7 +637,7 @@ extension Session: RtachClient.RtachSessionDelegate {
     nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveCommand data: Data) {
         Task { @MainActor in
             if let commandString = String(data: data, encoding: .utf8) {
-                Logger.clauntty.info("Received command from rtach: \(commandString)")
+                Logger.clauntty.debugOnly("Received command from rtach: \(commandString)")
                 self.handleRtachCommand(commandString)
             }
         }

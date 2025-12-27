@@ -183,13 +183,15 @@ EOF
     launch)
         udid=$(ensure_ready)
         mode="${2:-}"
-        echo -e "${BLUE}Launching Clauntty...${NC}"
+        echo -e "${BLUE}Launching Clauntty (verbose logging enabled)...${NC}"
         xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true
         sleep 0.5
+        # Launch with CLAUNTTY_VERBOSE=1 for verbose debug logging
+        # SIMCTL_CHILD_ prefix passes env vars to launched app
         if [ -n "$mode" ]; then
-            xcrun simctl launch booted "$BUNDLE_ID" "$mode"
+            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID" "$mode"
         else
-            xcrun simctl launch booted "$BUNDLE_ID"
+            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID"
         fi
         sleep 2
         echo -e "${GREEN}Launched${NC}"
@@ -435,18 +437,19 @@ for el in data:
         APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData/Clauntty-*/Build/Products/Debug-iphonesimulator -name "Clauntty.app" -type d 2>/dev/null | head -1)
         xcrun simctl install booted "$APP_PATH"
 
-        # Launch
-        echo -e "${BLUE}[3/5] Launching...${NC}"
+        # Launch (with verbose logging enabled)
+        echo -e "${BLUE}[3/5] Launching (verbose logging enabled)...${NC}"
         xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true
         sleep 0.5
+        # SIMCTL_CHILD_ prefix passes env vars to launched app
         if [ -n "$connection" ] && [ -n "$tabs_spec" ]; then
-            xcrun simctl launch booted "$BUNDLE_ID" -- --connect "$connection" --tabs "$tabs_spec"
+            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID" -- --connect "$connection" --tabs "$tabs_spec"
             echo -e "${GREEN}Launched with --connect $connection --tabs $tabs_spec${NC}"
         elif [ -n "$connection" ]; then
-            xcrun simctl launch booted "$BUNDLE_ID" -- --connect "$connection"
+            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID" -- --connect "$connection"
             echo -e "${GREEN}Launched with --connect $connection${NC}"
         else
-            xcrun simctl launch booted "$BUNDLE_ID"
+            SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted "$BUNDLE_ID"
             echo -e "${GREEN}Launched${NC}"
         fi
 

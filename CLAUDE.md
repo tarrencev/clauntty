@@ -41,6 +41,7 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 | `../libxev/src/backend/kqueue.zig` | Event loop (iOS fixes) |
 | `Clauntty/Core/Terminal/` | GhosttyApp, TerminalSurface, GhosttyBridge |
 | `Clauntty/Core/SSH/` | SSHConnection, SSHAuthenticator |
+| `Clauntty/Core/Terminal/GhosttyApp.swift` | GhosttyApp + Logger extension with `debugOnly()`, `verbose()` |
 
 ## Build Commands
 
@@ -63,6 +64,38 @@ xcodebuild test -project Clauntty.xcodeproj -scheme ClaunttyTests \
 ```
 
 ## Logging & Debugging
+
+### Log Levels
+
+The app uses a tiered logging system optimized for performance:
+
+| Logger Method | When Logged | Use Case |
+|---------------|-------------|----------|
+| `Logger.clauntty.error()` | Always | Errors, failures |
+| `Logger.clauntty.warning()` | Always | Warnings |
+| `Logger.clauntty.info()` | Always | Important state changes |
+| `Logger.clauntty.debugOnly()` | DEBUG builds only | Development info |
+| `Logger.clauntty.verbose()` | DEBUG + CLAUNTTY_VERBOSE=1 | Hot path, hex dumps |
+
+**Performance characteristics:**
+- **Release builds**: `debugOnly()` and `verbose()` are compiled out entirely (zero overhead)
+- **Debug builds**: Single boolean check for `verbose()` - negligible overhead
+- **`@autoclosure`**: Message strings only constructed if logging is enabled
+
+### Enable Verbose Logging
+
+```bash
+# sim.sh automatically enables verbose logging
+./scripts/sim.sh debug devbox
+
+# Or launch manually with verbose logging
+SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted com.clauntty.app
+
+# In Xcode: Edit Scheme → Run → Arguments → Environment Variables
+# Add: CLAUNTTY_VERBOSE = 1
+```
+
+### Log Commands
 
 ```bash
 # Stream app logs

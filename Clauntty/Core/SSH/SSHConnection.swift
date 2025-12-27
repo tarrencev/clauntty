@@ -127,7 +127,7 @@ class SSHConnection: ObservableObject {
     }
 
     private func createPTYChannel() async throws {
-        Logger.clauntty.info("SSH: createPTYChannel starting...")
+        Logger.clauntty.debugOnly("SSH: createPTYChannel starting...")
         guard let channel = self.channel else {
             throw SSHError.notConnected
         }
@@ -140,13 +140,13 @@ class SSHConnection: ObservableObject {
         self.channelHandler = handler
 
         // Create child channel for PTY session
-        Logger.clauntty.info("SSH: getting NIOSSHHandler from pipeline...")
+        Logger.clauntty.debugOnly("SSH: getting NIOSSHHandler from pipeline...")
         let childChannel = try await channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler -> EventLoopFuture<Channel> in
-            Logger.clauntty.info("SSH: got handler, creating channel...")
+            Logger.clauntty.debugOnly("SSH: got handler, creating channel...")
             let promise = channel.eventLoop.makePromise(of: Channel.self)
 
             sshHandler.createChannel(promise) { childChannel, channelType in
-                Logger.clauntty.info("SSH: channel callback, type=\(String(describing: channelType))")
+                Logger.clauntty.debugOnly("SSH: channel callback, type=\(String(describing: channelType))")
                 guard channelType == .session else {
                     return channel.eventLoop.makeFailedFuture(SSHError.invalidChannelType)
                 }
@@ -155,7 +155,7 @@ class SSHConnection: ObservableObject {
 
             return promise.futureResult
         }.get()
-        Logger.clauntty.info("SSH: child channel created")
+        Logger.clauntty.debugOnly("SSH: child channel created")
 
         self.sshChildChannel = childChannel
 
@@ -230,7 +230,7 @@ class SSHConnection: ObservableObject {
             terminalModes: .init([:])
         )
 
-        Logger.clauntty.info("SSH PTY request: \(terminalSize.columns)x\(terminalSize.rows)")
+        Logger.clauntty.debugOnly("SSH PTY request: \(terminalSize.columns)x\(terminalSize.rows)")
         try await childChannel.triggerUserOutboundEvent(ptyRequest).get()
 
         if let command = command {
@@ -240,7 +240,7 @@ class SSHConnection: ObservableObject {
                 wantReply: true
             )
             try await childChannel.triggerUserOutboundEvent(execRequest).get()
-            Logger.clauntty.info("SSH exec: \(command)")
+            Logger.clauntty.debugOnly("SSH exec: \(command)")
         } else {
             // Request interactive shell
             let shellRequest = SSHChannelRequestEvent.ShellRequest(wantReply: true)
@@ -248,13 +248,13 @@ class SSHConnection: ObservableObject {
             Logger.clauntty.info("SSH shell started")
         }
 
-        Logger.clauntty.info("SSH channel created")
+        Logger.clauntty.debugOnly("SSH channel created")
         return (childChannel, handler)
     }
 
     /// Execute a command and return output (for setup/deployment)
     func executeCommand(_ command: String) async throws -> String {
-        Logger.clauntty.info("executeCommand: starting '\(command.prefix(50))...'")
+        Logger.clauntty.debugOnly("executeCommand: starting '\(command.prefix(50))...'")
         guard let channel = self.channel, channel.isActive else {
             Logger.clauntty.error("executeCommand: channel not connected")
             throw SSHError.notConnected
@@ -287,13 +287,13 @@ class SSHConnection: ObservableObject {
             command: command,
             wantReply: true
         )
-        Logger.clauntty.info("executeCommand: sending exec request...")
+        Logger.clauntty.debugOnly("executeCommand: sending exec request...")
         try await childChannel.triggerUserOutboundEvent(execRequest).get()
-        Logger.clauntty.info("executeCommand: exec request sent, waiting for channel close...")
+        Logger.clauntty.debugOnly("executeCommand: exec request sent, waiting for channel close...")
 
         // Wait for channel to close (command completed)
         try await childChannel.closeFuture.get()
-        Logger.clauntty.info("executeCommand: channel closed, output=\(output.count) bytes")
+        Logger.clauntty.debugOnly("executeCommand: channel closed, output=\(output.count) bytes")
 
         return String(data: output, encoding: .utf8) ?? ""
     }
@@ -305,7 +305,7 @@ class SSHConnection: ObservableObject {
             throw SSHError.notConnected
         }
 
-        Logger.clauntty.info("executeWithStdin: creating child channel for: \(command)")
+        Logger.clauntty.debugOnly("executeWithStdin: creating child channel for: \(command)")
 
         let handler = SSHChannelHandler(onDataReceived: nil)
 
@@ -323,13 +323,13 @@ class SSHConnection: ObservableObject {
         }.get()
 
         // Request exec
-        Logger.clauntty.info("executeWithStdin: child channel created, requesting exec")
+        Logger.clauntty.debugOnly("executeWithStdin: child channel created, requesting exec")
         let execRequest = SSHChannelRequestEvent.ExecRequest(
             command: command,
             wantReply: true
         )
         try await childChannel.triggerUserOutboundEvent(execRequest).get()
-        Logger.clauntty.info("executeWithStdin: exec request sent, writing \(stdinData.count) bytes")
+        Logger.clauntty.debugOnly("executeWithStdin: exec request sent, writing \(stdinData.count) bytes")
 
         // Write stdin data directly to channel (with proper await via promise)
         let writePromise = childChannel.eventLoop.makePromise(of: Void.self)
@@ -340,22 +340,22 @@ class SSHConnection: ObservableObject {
             childChannel.writeAndFlush(channelData, promise: writePromise)
         }
         try await writePromise.futureResult.get()
-        Logger.clauntty.info("executeWithStdin: data written, sending EOF")
+        Logger.clauntty.debugOnly("executeWithStdin: data written, sending EOF")
 
         // Send EOF to indicate we're done writing (close output side of channel)
         // The channel might already be closed if the command completed very quickly,
         // so we handle ChannelError.alreadyClosed gracefully
         do {
             try await childChannel.close(mode: .output).get()
-            Logger.clauntty.info("executeWithStdin: EOF sent, waiting for close")
+            Logger.clauntty.debugOnly("executeWithStdin: EOF sent, waiting for close")
         } catch let error as ChannelError where error == .alreadyClosed {
-            Logger.clauntty.info("executeWithStdin: channel already closed (command completed quickly)")
+            Logger.clauntty.debugOnly("executeWithStdin: channel already closed (command completed quickly)")
             return
         }
 
         // Wait for command to complete
         try await childChannel.closeFuture.get()
-        Logger.clauntty.info("executeWithStdin: command completed successfully")
+        Logger.clauntty.debugOnly("executeWithStdin: command completed successfully")
     }
 
     /// Send terminal window size change to SSH server
@@ -375,7 +375,7 @@ class SSHConnection: ObservableObject {
         // Must execute on event loop
         childChannel.eventLoop.execute {
             childChannel.triggerUserOutboundEvent(windowChange, promise: nil)
-            Logger.clauntty.info("SSH window change sent: \(columns)x\(rows)")
+            Logger.clauntty.debugOnly("SSH window change sent: \(columns)x\(rows)")
         }
     }
 
@@ -420,14 +420,14 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
         // Only handle standard data (not extended/stderr)
         guard case .byteBuffer(let buffer) = channelData.data,
               channelData.type == .channel else {
-            Logger.clauntty.debug("channelRead: ignoring non-channel data, type=\(String(describing: channelData.type))")
+            Logger.clauntty.debugOnly("channelRead: ignoring non-channel data, type=\(String(describing: channelData.type))")
             return
         }
 
         // Get bytes and send to terminal for display
         if let bytes = buffer.getBytes(at: buffer.readerIndex, length: buffer.readableBytes) {
             let data = Data(bytes)
-            Logger.clauntty.info("channelRead: received \(data.count) bytes from SSH")
+            Logger.clauntty.verbose("channelRead: received \(data.count) bytes from SSH")
             DispatchQueue.main.async { [weak self] in
                 self?.onDataReceived?(data)
             }
@@ -441,8 +441,7 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
             return
         }
 
-        let hexString = data.map { String(format: "%02X", $0) }.joined(separator: " ")
-        Logger.clauntty.info("sendToRemote: sending \(data.count) bytes to SSH: \(hexString)")
+        Logger.clauntty.verbose("sendToRemote: sending \(data.count) bytes to SSH: \(data.map { String(format: "%02X", $0) }.joined(separator: " "))")
 
         // IMPORTANT: NIO operations must be on the event loop thread
         context.eventLoop.execute {
