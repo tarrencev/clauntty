@@ -346,6 +346,7 @@
 				C8000000 /* NIOCore */,
 				C8000001 /* NIOPosix */,
 				C8000002 /* NIOSSH */,
+				C8000003 /* RtachClient */,
 			);
 			productName = Clauntty;
 			productReference = C1000000 /* Clauntty.app */;
@@ -414,6 +415,7 @@
 			packageReferences = (
 				C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */,
 				C7000001 /* XCRemoteSwiftPackageReference "swift-nio" */,
+				C7000002 /* XCLocalSwiftPackageReference "RtachClient" */,
 			);
 			productRefGroup = C3000011 /* Products */;
 			projectDirPath = "";
@@ -832,6 +834,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		C7000002 /* XCLocalSwiftPackageReference "RtachClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = RtachClient;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -866,6 +875,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = C7000000 /* XCRemoteSwiftPackageReference "swift-nio-ssh" */;
 			productName = NIOSSH;
+		};
+		C8000003 /* RtachClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RtachClient;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

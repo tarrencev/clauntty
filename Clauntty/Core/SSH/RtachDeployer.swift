@@ -54,7 +54,11 @@ class RtachDeployer {
     /// 1.8.3 - Performance: ReleaseFast, writev for scrollback, debug logs in hot paths
     /// 1.8.4 - Explicit SIGWINCH to process group on window size change (fixes TUI redraw)
     /// 1.9.0 - Command pipe: scripts write to $RTACH_CMD_FD to send commands to Clauntty
-    static let expectedVersion = "1.9.0"
+    /// 2.0.0 - Framed protocol: ALL data from rtach is now framed [type][len][payload]
+    ///         Adds handshake on attach with magic "RTCH" and protocol version.
+    ///         Fixes race conditions where terminal data was misinterpreted as protocol headers.
+    /// 2.0.1 - Send alternate screen escape sequence on reconnect (fixes "@" artifact in Claude Code)
+    static let expectedVersion = "2.0.3"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app

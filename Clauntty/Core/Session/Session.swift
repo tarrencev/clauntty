@@ -2,6 +2,7 @@ import Foundation
 import NIOCore
 import NIOSSH
 import os.log
+import RtachClient
 
 /// Represents a single terminal session (one tab)
 /// Each session has its own SSH channel and terminal surface
@@ -216,31 +217,14 @@ class Session: ObservableObject, Identifiable {
     /// Called when a web tab should be opened via OSC 777
     var onOpenTabRequested: ((Int) -> Void)?
 
-    // MARK: - Scrollback Request State
+    // MARK: - rtach Protocol Session
 
-    /// State machine for scrollback request/response
-    private enum ScrollbackState {
-        case idle                          // Not requesting scrollback
-        case waitingForHeader              // Sent request, waiting for 5-byte header
-        case receivingData(remaining: Int) // Receiving scrollback data (legacy type=1)
-        case waitingForPageMeta(dataLen: Int) // Waiting for 8-byte metadata (paginated type=3)
-        case receivingPageData(remaining: Int) // Receiving paginated scrollback data
-    }
+    /// State machine for rtach protocol (raw/framed mode handling)
+    private let rtachProtocol = RtachClient.RtachSession()
 
-    /// Current scrollback request state
-    private var scrollbackState: ScrollbackState = .idle
-
-    /// Buffer for accumulating scrollback response
-    private var scrollbackResponseBuffer = Data()
-
-    /// Buffer for partial header (if header arrives split across packets)
-    private var headerBuffer = Data()
-
-    /// Buffer for partial metadata (if metadata arrives split across packets)
-    private var metaBuffer = Data()
-
-    /// Whether we've already requested scrollback for this session
-    private var scrollbackRequested = false
+    /// Debug counters for tracking data flow
+    private var totalBytesReceived = 0
+    private var totalBytesToTerminal = 0
 
     // MARK: - Paginated Scrollback State
 
@@ -259,24 +243,6 @@ class Session: ObservableObject, Identifiable {
     /// Whether a scrollback page request is currently in flight
     private var scrollbackPageRequestPending: Bool = false
 
-    // MARK: - Command Message State
-
-    /// State machine for receiving command messages from rtach
-    private enum CommandState {
-        case idle                          // Not receiving a command
-        case waitingForHeader              // Saw command type byte, waiting for rest of header
-        case receivingData(remaining: Int) // Receiving command data
-    }
-
-    /// Current command receive state
-    private var commandState: CommandState = .idle
-
-    /// Buffer for accumulating command header
-    private var commandHeaderBuffer = Data()
-
-    /// Buffer for accumulating command data
-    private var commandDataBuffer = Data()
-
     // MARK: - Initialization
 
     init(connectionConfig: SavedConnection) {
@@ -288,12 +254,23 @@ class Session: ObservableObject, Identifiable {
     // MARK: - Channel Management
 
     /// Attach an SSH channel to this session
-    func attach(channel: Channel, handler: SSHChannelHandler, connection: SSHConnection) {
+    /// - Parameters:
+    ///   - channel: The SSH channel
+    ///   - handler: The channel handler
+    ///   - connection: The parent SSH connection
+    ///   - expectsRtach: Whether to expect rtach protocol (session management enabled)
+    func attach(channel: Channel, handler: SSHChannelHandler, connection: SSHConnection, expectsRtach: Bool = true) {
         self.sshChannel = channel
         self.channelHandler = handler
         self.parentConnection = connection
         self.state = .connected
         onStateChanged?(.connected)
+
+        // Set up rtach protocol delegate and mark as connected
+        rtachProtocol.expectsRtach = expectsRtach
+        rtachProtocol.delegate = self
+        rtachProtocol.connect()
+
         Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): channel attached, channelHandler is set")
     }
 
@@ -311,21 +288,25 @@ class Session: ObservableObject, Identifiable {
         parentConnection = nil
         state = .disconnected
         onStateChanged?(.disconnected)
+
+        // Reset rtach protocol state for reconnection
+        rtachProtocol.reset()
+
         Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): channel detached")
     }
 
     // MARK: - Data Flow
 
     /// Handle data received from SSH
+    /// Delegates to RtachSession for protocol handling (raw vs framed mode)
     func handleDataReceived(_ data: Data) {
-        // If we're receiving a scrollback response, handle it separately
-        if case .idle = scrollbackState {
-            // Normal data flow
-            handleNormalData(data)
-        } else {
-            // Scrollback response handling
-            handleScrollbackResponse(data)
-        }
+        self.totalBytesReceived += data.count
+        // Debug: log first 32 bytes as hex
+        let preview = data.prefix(32).map { String(format: "%02x", $0) }.joined(separator: " ")
+        Logger.clauntty.info("[FRAME] received \(data.count) bytes (total=\(self.totalBytesReceived)), state=\(String(describing: self.rtachProtocol.state)), first32=\(preview)")
+
+        // Delegate to RtachSession for protocol handling
+        rtachProtocol.processIncomingData(data)
     }
 
     // MARK: - Loading Indicator
@@ -403,85 +384,24 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
-    /// Handle normal terminal data
-    private func handleNormalData(_ data: Data) {
-        var remainingData = data
-
-        // Check for command messages from rtach (type byte = 2)
-        // These can arrive mixed with terminal data
-        while !remainingData.isEmpty {
-            switch commandState {
-            case .idle:
-                // Check if this looks like a command message (type = 2)
-                if remainingData[0] == 2 {
-                    // Start accumulating command header
-                    commandState = .waitingForHeader
-                    commandHeaderBuffer.removeAll()
-                    commandHeaderBuffer.append(remainingData[0])
-                    remainingData = remainingData.dropFirst(1)
-                } else {
-                    // Normal terminal data - process and return
-                    processTerminalData(remainingData)
-                    return
-                }
-
-            case .waitingForHeader:
-                // Accumulate bytes until we have 5 bytes for the header
-                let headerSize = 5  // 1 byte type + 4 bytes length
-                let needed = headerSize - commandHeaderBuffer.count
-                let available = min(needed, remainingData.count)
-
-                commandHeaderBuffer.append(remainingData.prefix(available))
-                remainingData = remainingData.dropFirst(available)
-
-                if commandHeaderBuffer.count >= headerSize {
-                    // Parse header: [type: 1 byte][length: 4 bytes little-endian]
-                    let type = commandHeaderBuffer[0]
-                    let length = commandHeaderBuffer.withUnsafeBytes { ptr -> UInt32 in
-                        ptr.loadUnaligned(fromByteOffset: 1, as: UInt32.self)
-                    }
-
-                    if type == 2 && length > 0 && length < 1024 {
-                        // Valid command header - receive data
-                        commandState = .receivingData(remaining: Int(length))
-                        commandDataBuffer.removeAll(keepingCapacity: true)
-                    } else if type == 2 && length == 0 {
-                        // Empty command (shouldn't happen, but handle it)
-                        commandState = .idle
-                        commandHeaderBuffer.removeAll()
-                    } else {
-                        // Not a valid command - treat header bytes as terminal data
-                        Logger.clauntty.debug("Invalid command header, forwarding as terminal data")
-                        processTerminalData(commandHeaderBuffer)
-                        commandState = .idle
-                        commandHeaderBuffer.removeAll()
-                    }
-                }
-
-            case .receivingData(let remaining):
-                let toRead = min(remaining, remainingData.count)
-                commandDataBuffer.append(remainingData.prefix(toRead))
-                remainingData = remainingData.dropFirst(toRead)
-
-                let newRemaining = remaining - toRead
-                if newRemaining <= 0 {
-                    // Complete command - dispatch it
-                    if let commandString = String(data: commandDataBuffer, encoding: .utf8) {
-                        Logger.clauntty.info("Received command from rtach: \(commandString)")
-                        handleRtachCommand(commandString)
-                    }
-                    commandState = .idle
-                    commandHeaderBuffer.removeAll()
-                    commandDataBuffer.removeAll()
-                } else {
-                    commandState = .receivingData(remaining: newRemaining)
-                }
-            }
-        }
-    }
-
-    /// Process actual terminal data (after command detection)
+    /// Process terminal data (forward to terminal and track scrollback)
     private func processTerminalData(_ data: Data) {
+        totalBytesToTerminal += data.count
+
+        // Log if this data contains alternate screen switch escape sequence
+        // ESC[?1049h = switch to alternate screen (bytes: 1b 5b 3f 31 30 34 39 68)
+        // ESC[?1049l = switch to normal screen (bytes: 1b 5b 3f 31 30 34 39 6c)
+        // Search for byte pattern directly (more reliable than UTF-8 string conversion)
+        let altScreenEnter = Data([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x68]) // ESC[?1049h
+        let altScreenExit = Data([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c])  // ESC[?1049l
+
+        if data.range(of: altScreenEnter) != nil {
+            Logger.clauntty.info("[ALTSCREEN] Received ESC[?1049h (switch to alternate screen) in \(data.count) bytes")
+        }
+        if data.range(of: altScreenExit) != nil {
+            Logger.clauntty.info("[ALTSCREEN] Received ESC[?1049l (switch to normal screen) in \(data.count) bytes")
+        }
+
         // Track loading state for showing loading indicator
         updateLoadingState(bytesReceived: data.count)
 
@@ -520,161 +440,6 @@ class Session: ObservableObject, Identifiable {
             }
         default:
             Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
-        }
-    }
-
-    /// Handle scrollback response data (when in scrollback receive mode)
-    private func handleScrollbackResponse(_ data: Data) {
-        var remainingData = data
-        var processedAny = false
-
-        while !remainingData.isEmpty {
-            switch scrollbackState {
-            case .idle:
-                // Shouldn't happen, but if we get here, forward remaining data normally
-                if processedAny {
-                    handleNormalData(remainingData)
-                }
-                return
-
-            case .waitingForHeader:
-                // Accumulate bytes until we have 5 bytes for the header
-                let headerSize = 5  // 1 byte type + 4 bytes length
-                let needed = headerSize - headerBuffer.count
-                let available = min(needed, remainingData.count)
-
-                headerBuffer.append(remainingData.prefix(available))
-                remainingData = remainingData.dropFirst(available)
-                processedAny = true
-
-                if headerBuffer.count >= headerSize {
-                    // Parse header: [type: 1 byte][length: 4 bytes little-endian]
-                    let type = headerBuffer[0]
-                    // Use loadUnaligned since the UInt32 is at offset 1 (not 4-byte aligned)
-                    let length = headerBuffer.withUnsafeBytes { ptr -> UInt32 in
-                        ptr.loadUnaligned(fromByteOffset: 1, as: UInt32.self)
-                    }
-
-                    Logger.clauntty.info("Scrollback header: type=\(type), length=\(length)")
-
-                    if type == 1 && length > 0 {
-                        // Type 1 = legacy scrollback, transition to receiving data
-                        scrollbackState = .receivingData(remaining: Int(length))
-                        scrollbackResponseBuffer.removeAll(keepingCapacity: true)
-                    } else if type == 3 && length > 8 {
-                        // Type 3 = paginated scrollback_page, need to read metadata first
-                        // length includes 8 bytes of metadata + data
-                        scrollbackState = .waitingForPageMeta(dataLen: Int(length) - 8)
-                        metaBuffer.removeAll()
-                    } else if type == 3 && length == 8 {
-                        // Type 3 with only metadata (no data) - empty page
-                        scrollbackState = .waitingForPageMeta(dataLen: 0)
-                        metaBuffer.removeAll()
-                    } else if length == 0 {
-                        // Empty scrollback response
-                        Logger.clauntty.info("Scrollback response: empty (all data was in initial send)")
-                        scrollbackState = .idle
-                        scrollbackPageRequestPending = false
-                        scrollbackFullyLoaded = true
-                    } else {
-                        // Unknown type, abort
-                        Logger.clauntty.warning("Unknown scrollback response type: \(type)")
-                        scrollbackState = .idle
-                        scrollbackPageRequestPending = false
-                    }
-                    headerBuffer.removeAll()
-                }
-
-            case .receivingData(let remaining):
-                // Legacy scrollback response (type=1)
-                let toRead = min(remaining, remainingData.count)
-                scrollbackResponseBuffer.append(remainingData.prefix(toRead))
-                remainingData = remainingData.dropFirst(toRead)
-                processedAny = true
-
-                let newRemaining = remaining - toRead
-                if newRemaining <= 0 {
-                    // Complete! Deliver the scrollback
-                    let byteCount = self.scrollbackResponseBuffer.count
-                    Logger.clauntty.info("Scrollback response complete: \(byteCount) bytes")
-                    let scrollbackData = self.scrollbackResponseBuffer
-                    self.scrollbackResponseBuffer.removeAll()
-                    self.scrollbackState = .idle
-
-                    // Deliver to callback
-                    self.onScrollbackReceived?(scrollbackData)
-                } else {
-                    self.scrollbackState = .receivingData(remaining: newRemaining)
-                }
-
-            case .waitingForPageMeta(let dataLen):
-                // Accumulate 8 bytes for metadata
-                let metaSize = 8  // total_len (4) + offset (4)
-                let needed = metaSize - metaBuffer.count
-                let available = min(needed, remainingData.count)
-
-                metaBuffer.append(remainingData.prefix(available))
-                remainingData = remainingData.dropFirst(available)
-                processedAny = true
-
-                if metaBuffer.count >= metaSize {
-                    // Parse metadata: [total_len: 4 bytes LE][offset: 4 bytes LE]
-                    let totalLen = metaBuffer.withUnsafeBytes { ptr -> UInt32 in
-                        ptr.loadUnaligned(fromByteOffset: 0, as: UInt32.self)
-                    }
-                    let offset = metaBuffer.withUnsafeBytes { ptr -> UInt32 in
-                        ptr.loadUnaligned(fromByteOffset: 4, as: UInt32.self)
-                    }
-
-                    Logger.clauntty.info("Scrollback page meta: total=\(totalLen), offset=\(offset), dataLen=\(dataLen)")
-
-                    scrollbackTotalSize = Int(totalLen)
-
-                    if dataLen > 0 {
-                        scrollbackState = .receivingPageData(remaining: dataLen)
-                        scrollbackResponseBuffer.removeAll(keepingCapacity: true)
-                    } else {
-                        // Empty page - we've loaded everything
-                        scrollbackState = .idle
-                        scrollbackPageRequestPending = false
-                        scrollbackFullyLoaded = true
-                        Logger.clauntty.info("Scrollback fully loaded (empty page)")
-                    }
-                    metaBuffer.removeAll()
-                }
-
-            case .receivingPageData(let remaining):
-                // Paginated scrollback response (type=3)
-                let toRead = min(remaining, remainingData.count)
-                scrollbackResponseBuffer.append(remainingData.prefix(toRead))
-                remainingData = remainingData.dropFirst(toRead)
-                processedAny = true
-
-                let newRemaining = remaining - toRead
-                if newRemaining <= 0 {
-                    // Page complete!
-                    let byteCount = self.scrollbackResponseBuffer.count
-                    Logger.clauntty.info("Scrollback page complete: \(byteCount) bytes")
-                    let scrollbackData = self.scrollbackResponseBuffer
-                    self.scrollbackResponseBuffer.removeAll()
-                    self.scrollbackState = .idle
-                    self.scrollbackPageRequestPending = false
-
-                    // Update offset
-                    self.scrollbackLoadedOffset += byteCount
-
-                    // Check if fully loaded
-                    if let total = self.scrollbackTotalSize, self.scrollbackLoadedOffset >= total {
-                        self.scrollbackFullyLoaded = true
-                        Logger.clauntty.info("Scrollback fully loaded: \(total) bytes total")
-                    }
-
-                    // Deliver to callback
-                    self.onScrollbackReceived?(scrollbackData)
-                } else {
-                    self.scrollbackState = .receivingPageData(remaining: newRemaining)
-                }
-            }
         }
     }
 
@@ -725,13 +490,15 @@ class Session: ObservableObject, Identifiable {
     }
 
     /// Send data to remote (keyboard input)
+    /// Uses rtach protocol to automatically frame when in framed mode
     func sendData(_ data: Data) {
         let hasHandler = self.channelHandler != nil
         Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): sendData called with \(data.count) bytes, channelHandler=\(hasHandler ? "set" : "nil")")
         if channelHandler == nil {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): sendData called but channelHandler is nil!")
         }
-        channelHandler?.sendToRemote(data)
+        // Route through rtach protocol - handles raw vs framed mode
+        rtachProtocol.sendKeyboardInput(data)
     }
 
     /// Send window size change
@@ -741,6 +508,7 @@ class Session: ObservableObject, Identifiable {
             return
         }
 
+        // Send SSH window change request
         let windowChange = SSHChannelRequestEvent.WindowChangeRequest(
             terminalCharacterWidth: Int(columns),
             terminalRowHeight: Int(rows),
@@ -751,6 +519,11 @@ class Session: ObservableObject, Identifiable {
         channel.eventLoop.execute {
             channel.triggerUserOutboundEvent(windowChange, promise: nil)
         }
+
+        // Also send via rtach protocol (WINCH packet) if in framed mode
+        let size = RtachClient.WindowSize(rows: rows, cols: columns)
+        rtachProtocol.sendWindowSize(size)
+
         Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): window change \(columns)x\(rows)")
     }
 
@@ -760,6 +533,13 @@ class Session: ObservableObject, Identifiable {
     /// This uses the new request_scrollback_page message type (6) which returns
     /// scrollback in chunks to prevent iOS watchdog kills.
     func requestScrollbackPage() {
+        // Only request scrollback after we've confirmed rtach is running (received handshake)
+        // Before handshake or in raw mode, these packets would be sent to the shell as garbage input
+        guard rtachProtocol.isRtachRunning else {
+            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): skipping scrollback request (no rtach handshake received)")
+            return
+        }
+
         guard !scrollbackFullyLoaded else {
             Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback already fully loaded")
             return
@@ -770,31 +550,15 @@ class Session: ObservableObject, Identifiable {
             return
         }
 
-        guard case .idle = scrollbackState else {
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback state not idle")
-            return
-        }
-
         guard channelHandler != nil else {
             Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): cannot request scrollback, no channel")
             return
         }
 
         scrollbackPageRequestPending = true
-        scrollbackState = .waitingForHeader
-        headerBuffer.removeAll()
 
-        // Build request: [type: 1 byte = 6][len: 1 byte = 8][offset: 4 bytes LE][limit: 4 bytes LE]
-        var packet = Data()
-        packet.append(6)  // MessageType.request_scrollback_page = 6
-        packet.append(8)  // Payload length = 8 bytes
-
-        var offset = UInt32(scrollbackLoadedOffset).littleEndian
-        var limit = UInt32(scrollbackPageSize).littleEndian
-        withUnsafeBytes(of: &offset) { packet.append(contentsOf: $0) }
-        withUnsafeBytes(of: &limit) { packet.append(contentsOf: $0) }
-
-        channelHandler?.sendToRemote(packet)
+        // Send via rtach protocol
+        rtachProtocol.requestScrollbackPage(offset: UInt32(scrollbackLoadedOffset), limit: UInt32(scrollbackPageSize))
 
         Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): requesting scrollback page offset=\(self.scrollbackLoadedOffset) limit=\(self.scrollbackPageSize)")
     }
@@ -802,33 +566,8 @@ class Session: ObservableObject, Identifiable {
     /// Load more scrollback if user is scrolling near the top and more is available
     /// Call this from TerminalView when user scrolls near the top of scrollback
     func loadMoreScrollbackIfNeeded() {
+        Logger.clauntty.debug("[SCROLL] loadMoreScrollbackIfNeeded called, pending=\(self.scrollbackPageRequestPending), fullyLoaded=\(self.scrollbackFullyLoaded)")
         requestScrollbackPage()
-    }
-
-    /// Legacy: Request all old scrollback at once (deprecated - use requestScrollbackPage instead)
-    /// This can cause watchdog kills on iOS with large scrollback buffers
-    @available(*, deprecated, message: "Use requestScrollbackPage() for paginated loading")
-    func requestScrollback() {
-        guard !scrollbackRequested else {
-            Logger.clauntty.debug("Session \(self.id.uuidString.prefix(8)): scrollback already requested")
-            return
-        }
-
-        guard channelHandler != nil else {
-            Logger.clauntty.warning("Session \(self.id.uuidString.prefix(8)): cannot request scrollback, no channel")
-            return
-        }
-
-        scrollbackRequested = true
-        scrollbackState = .waitingForHeader
-        headerBuffer.removeAll()
-
-        // Send rtach request_scrollback packet (legacy)
-        // Format: [type: 1 byte = 5][length: 1 byte = 0]
-        let packet = Data([5, 0])  // MessageType.request_scrollback = 5, length = 0
-        channelHandler?.sendToRemote(packet)
-
-        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): requested old scrollback from rtach (legacy)")
     }
 
     // MARK: - Scrollback Persistence
@@ -859,5 +598,64 @@ extension Session: Hashable {
 
     nonisolated static func == (lhs: Session, rhs: Session) -> Bool {
         lhs.id == rhs.id
+    }
+}
+
+// MARK: - RtachSessionDelegate
+
+extension Session: RtachClient.RtachSessionDelegate {
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveTerminalData data: Data) {
+        Task { @MainActor in
+            self.processTerminalData(data)
+        }
+    }
+
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollback data: Data) {
+        Task { @MainActor in
+            Logger.clauntty.info("Scrollback response complete: \(data.count) bytes")
+            self.scrollbackPageRequestPending = false
+            self.onScrollbackReceived?(data)
+        }
+    }
+
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveScrollbackPage meta: RtachClient.ScrollbackPageMeta, data: Data) {
+        Task { @MainActor in
+            Logger.clauntty.info("Scrollback page complete: \(data.count) bytes, total=\(meta.totalLength), offset=\(meta.offset)")
+
+            self.scrollbackTotalSize = Int(meta.totalLength)
+            self.scrollbackPageRequestPending = false
+            self.scrollbackLoadedOffset += data.count
+
+            // Check if fully loaded
+            if self.scrollbackLoadedOffset >= Int(meta.totalLength) {
+                self.scrollbackFullyLoaded = true
+                Logger.clauntty.info("Scrollback fully loaded: \(meta.totalLength) bytes total")
+            }
+
+            self.onScrollbackReceived?(data)
+        }
+    }
+
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, didReceiveCommand data: Data) {
+        Task { @MainActor in
+            if let commandString = String(data: data, encoding: .utf8) {
+                Logger.clauntty.info("Received command from rtach: \(commandString)")
+                self.handleRtachCommand(commandString)
+            }
+        }
+    }
+
+    nonisolated func rtachSession(_ session: RtachClient.RtachSession, sendData data: Data) {
+        // Must run synchronously to maintain packet order
+        // The upgrade packet must be sent BEFORE we start framing keyboard input
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                self.channelHandler?.sendToRemote(data)
+            }
+        } else {
+            Task { @MainActor in
+                self.channelHandler?.sendToRemote(data)
+            }
+        }
     }
 }

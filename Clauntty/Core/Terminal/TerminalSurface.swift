@@ -204,6 +204,20 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         self.surface = surface
 
+        // Set up the PTY input callback for iOS
+        // This routes mouse events and other PTY input through to SSH
+        ghostty_surface_set_pty_input_callback(surface) { (userdata, data, len) in
+            guard let userdata = userdata else { return }
+            let view = Unmanaged<TerminalSurfaceView>.fromOpaque(userdata).takeUnretainedValue()
+            guard len > 0, let data = data else { return }
+            let inputData = Data(bytes: data, count: Int(len))
+            // Log the PTY input for debugging
+            let hex = inputData.map { String(format: "%02X", $0) }.joined(separator: " ")
+            Logger.clauntty.debug("[PTY_INPUT] \(inputData.count) bytes: \(hex)")
+            // Forward to SSH via the same callback as keyboard input
+            view.onTextInput?(inputData)
+        }
+
         // Register in static registry for Ghostty callback routing
         let ptr = UnsafeRawPointer(surface)
         Self.surfaceRegistry[ptr] = self
@@ -614,6 +628,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             if abs(scrollLines) >= 1 {
                 // Send scroll to Ghostty (y positive = scroll up/back in history)
+                Logger.clauntty.info("[SCROLL] calling ghostty_surface_mouse_scroll with y=\(scrollLines)")
                 ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
                 scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
 
@@ -916,7 +931,23 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     func focusDidChange(_ focused: Bool) {
         guard let surface = self.surface else { return }
+        let cursorBefore = getCursorInfo(surface)
+        Logger.clauntty.info("[CURSOR] focusDidChange(\(focused)) BEFORE: \(cursorBefore)")
         ghostty_surface_set_focus(surface, focused)
+        let cursorAfter = getCursorInfo(surface)
+        Logger.clauntty.info("[CURSOR] focusDidChange(\(focused)) AFTER: \(cursorAfter)")
+    }
+
+    /// Get cursor position and terminal state for debugging
+    private func getCursorInfo(_ surface: ghostty_surface_t) -> String {
+        var x: Double = 0
+        var y: Double = 0
+        var width: Double = 0
+        var height: Double = 0
+        ghostty_surface_ime_point(surface, &x, &y, &width, &height)
+        let altScreen = ghostty_surface_is_alternate_screen(surface)
+        let size = ghostty_surface_size(surface)
+        return "cursor=(\(Int(x)),\(Int(y))) altScreen=\(altScreen) grid=\(size.columns)x\(size.rows)"
     }
 
     // MARK: - SSH Data Flow
@@ -929,10 +960,29 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             return
         }
 
+        // Count cursor-up sequences (ESC [1A = 1b 5b 31 41) for debugging
+        var cursorUpCount = 0
+        var searchStart = data.startIndex
+        while let range = data.range(of: Data([0x1b, 0x5b, 0x31, 0x41]), in: searchStart..<data.endIndex) {
+            cursorUpCount += 1
+            searchStart = range.upperBound
+        }
+
+        let cursorBefore = getCursorInfo(surface)
+        if cursorUpCount > 0 {
+            Logger.clauntty.info("[CURSOR] writeSSHOutput BEFORE (has \(cursorUpCount) cursor-up): \(cursorBefore) size=\(data.count)")
+        }
+
         data.withUnsafeBytes { buffer in
             guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
             ghostty_surface_write_pty_output(surface, ptr, UInt(data.count))
         }
+
+        if cursorUpCount > 0 {
+            let cursorAfter = getCursorInfo(surface)
+            Logger.clauntty.info("[CURSOR] writeSSHOutput AFTER (had \(cursorUpCount) cursor-up): \(cursorAfter)")
+        }
+
         Logger.clauntty.debug("SSH output written: \(data.count) bytes")
     }
 

@@ -18,6 +18,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-ssh.git", from: "0.9.0"),
         // Required NIO dependencies
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.62.0"),
+        // Local rtach client package
+        .package(path: "RtachClient"),
     ],
     targets: [
         .target(
@@ -26,6 +28,7 @@ let package = Package(
                 .product(name: "NIOSSH", package: "swift-nio-ssh"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
+                "RtachClient",
             ],
             path: "Clauntty/Core"
         ),

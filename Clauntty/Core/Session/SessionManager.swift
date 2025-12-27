@@ -185,7 +185,7 @@ class SessionManager: ObservableObject {
         }
         Logger.clauntty.info("SessionManager: channel created for \(session.id.uuidString.prefix(8))")
 
-        session.attach(channel: channel, handler: handler, connection: connection)
+        session.attach(channel: channel, handler: handler, connection: connection, expectsRtach: useRtach)
 
         // Wire up OSC 777 callbacks for port forwarding
         session.onPortForwardRequested = { [weak self, weak session] port in

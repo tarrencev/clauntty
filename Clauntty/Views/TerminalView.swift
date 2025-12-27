@@ -65,6 +65,8 @@ struct TerminalView: View {
                     isActive: isActive,
                     onTextInput: { data in
                         // Send keyboard input to SSH via session
+                        let hex = data.map { String(format: "%02x", $0) }.joined(separator: " ")
+                        Logger.clauntty.info("[INPUT] onTextInput called with \(data.count) bytes: \(hex)")
                         session.sendData(data)
                     },
                     onTerminalSizeChanged: { rows, columns in
@@ -86,6 +88,14 @@ struct TerminalView: View {
                         Logger.clauntty.info("Session state changed to connected, forcing redraw")
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             surfaceHolder.surface?.forceRedraw()
+                        }
+
+                        // Send correct terminal size now that channel exists
+                        // This fixes PTY size mismatch when auto-connect ran before surface was ready
+                        if let surface = surfaceHolder.surface {
+                            let size = surface.terminalSize
+                            Logger.clauntty.info("Session connected, sending window change: \(size.columns)x\(size.rows)")
+                            session.sendWindowChange(rows: size.rows, columns: size.columns)
                         }
                     }
                 }
@@ -165,11 +175,26 @@ struct TerminalView: View {
         // Always wire up the display - we need this for data flow regardless of connection state
         wireSessionToSurface(surface: surface)
 
-        // If not disconnected, connection is already in progress or complete
-        guard session.state == .disconnected else {
-            Logger.clauntty.info("connectSession: session not disconnected, returning")
+        // If already connected, just send window change to fix terminal size
+        // This handles the case where auto-connect ran before surface was ready
+        if case .connected = session.state {
+            Logger.clauntty.info("connectSession: session already connected, sending window change")
+            let size = surface.terminalSize
+            session.sendWindowChange(rows: size.rows, columns: size.columns)
             return
         }
+
+        // If not disconnected (e.g., connecting), wait for connection to complete
+        guard session.state == .disconnected else {
+            Logger.clauntty.info("connectSession: session not disconnected (state=\(String(describing: session.state))), returning")
+            return
+        }
+
+        // Set initial terminal size from actual surface dimensions before connecting
+        // This ensures PTY is created with correct size from the start
+        let size = surface.terminalSize
+        session.initialTerminalSize = (rows: Int(size.rows), columns: Int(size.columns))
+        Logger.clauntty.info("Setting initial terminal size: \(size.columns)x\(size.rows)")
 
         // Start connection via SessionManager
         Task {
@@ -204,8 +229,12 @@ struct TerminalView: View {
         // Set up callback for session data → terminal display
         // Capture surface strongly - it's safe because session doesn't own the view
         session.onDataReceived = { data in
-            DispatchQueue.main.async {
+            if Thread.isMainThread {
                 surface.writeSSHOutput(data)
+            } else {
+                DispatchQueue.main.async {
+                    surface.writeSSHOutput(data)
+                }
             }
         }
 
@@ -226,7 +255,12 @@ struct TerminalView: View {
         // When user scrolls near the top, request old scrollback (paginated)
         // Skip if on alternate screen (vim, less, Claude Code) - no scrollback there
         surface.onScrollNearTop = { [weak session, weak surface] offset in
-            guard let surface = surface, !surface.isAlternateScreen else { return }
+            let isAlt = surface?.isAlternateScreen ?? true
+            Logger.clauntty.info("[SCROLL] onScrollNearTop: offset=\(offset), isAlternateScreen=\(isAlt)")
+            guard let surface = surface, !surface.isAlternateScreen else {
+                Logger.clauntty.info("[SCROLL] onScrollNearTop: skipping (alt screen or no surface)")
+                return
+            }
             session?.loadMoreScrollbackIfNeeded()
         }
     }
