@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import GhosttyKit
+import Combine
 import os.log
 
 // MARK: - Font Size Preference
@@ -142,10 +143,19 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Threshold in rows for triggering onScrollNearTop (default: 100 rows from top)
     var scrollNearTopThreshold: UInt = 100
 
+    /// Callback when active state changes (for power management)
+    /// Called with true when tab becomes active, false when inactive
+    var onActiveStateChanged: ((Bool) -> Void)?
+
     // MARK: - Font Size
 
     /// Current font size in points (tracked for persistence)
     private var currentFontSize: Float = FontSizePreference.current
+
+    // MARK: - Power Management
+
+    /// Subscription to power mode changes
+    private var powerModeObserver: AnyCancellable?
 
     // MARK: - UITextInputTraits
 
@@ -221,6 +231,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let ptr = UnsafeRawPointer(surface)
         Self.surfaceRegistry[ptr] = self
 
+        // Set initial power mode
+        updatePowerMode(PowerManager.shared.currentMode)
+
         Logger.clauntty.info("Terminal surface created successfully")
     }
 
@@ -236,6 +249,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        powerModeObserver?.cancel()
         if let surface = self.surface {
             // Unregister from static registry
             let ptr = UnsafeRawPointer(surface)
@@ -334,6 +348,28 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Add pinch gesture for font resizing
         let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
         addGestureRecognizer(pinchGesture)
+
+        // Subscribe to power mode changes for battery optimization
+        setupPowerModeObserver()
+    }
+
+    // MARK: - Power Mode
+
+    private func setupPowerModeObserver() {
+        // Subscribe to power mode changes on main thread
+        powerModeObserver = PowerManager.shared.$currentMode
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] mode in
+                self?.updatePowerMode(mode)
+            }
+    }
+
+    /// Update the Ghostty surface's power mode for battery optimization
+    private func updatePowerMode(_ mode: PowerMode) {
+        guard let surface = self.surface else { return }
+        let ghosttyMode = ghostty_power_mode_e(rawValue: UInt32(mode.rawValue))
+        ghostty_surface_set_power_mode(surface, ghosttyMode)
+        Logger.clauntty.info("Terminal power mode updated: \(String(describing: mode))")
     }
 
     // MARK: - Pinch to Zoom (Font Resize)
@@ -863,6 +899,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     func setActive(_ active: Bool) {
         guard active != isActiveTab else { return }
         isActiveTab = active
+
+        // Notify about active state change (for power management)
+        onActiveStateChanged?(active)
 
         if active {
             // Becoming active - gain focus and show keyboard

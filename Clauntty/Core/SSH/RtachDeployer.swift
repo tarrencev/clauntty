@@ -58,7 +58,16 @@ class RtachDeployer {
     ///         Adds handshake on attach with magic "RTCH" and protocol version.
     ///         Fixes race conditions where terminal data was misinterpreted as protocol headers.
     /// 2.0.1 - Send alternate screen escape sequence on reconnect (fixes "@" artifact in Claude Code)
-    static let expectedVersion = "2.0.3"
+    /// 2.1.0 - Pause/resume/idle: Battery optimization for inactive tabs.
+    ///         New messages: pause(8), resume(9) from client; idle(4) from server.
+    ///         Paused clients don't receive streaming data; buffered output flushed on resume.
+    ///         Idle notification sent after 2s of no PTY output (enables background notifications).
+    /// 2.1.1 - Debug logging to /tmp/rtach-debug.log
+    /// 2.1.2 - More detailed packet reception and idle timer logging with timestamps
+    /// 2.1.3 - Add PID to log prefix for multi-session debugging
+    /// 2.1.4 - Fix: client.zig now forwards pause/resume packets to master
+    /// 2.2.0 - Phase 2 network optimization complete: pause/resume/idle working
+    static let expectedVersion = "2.2.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app

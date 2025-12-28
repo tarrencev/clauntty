@@ -10,6 +10,8 @@ public enum RtachResponse: Sendable, Equatable {
     case command(Data)
     /// Paginated scrollback with metadata
     case scrollbackPage(meta: ScrollbackPageMeta, data: Data)
+    /// Shell is idle (waiting for input, no PTY output for 2s)
+    case idle
     /// Protocol handshake
     case handshake(Handshake)
 }
@@ -130,6 +132,10 @@ public final class PacketReader {
             }
             let data = payload.dropFirst(ProtocolConstants.scrollbackMetaSize)
             return .scrollbackPage(meta: meta, data: Data(data))
+
+        case .idle:
+            // Idle notification (no payload)
+            return .idle
 
         case .handshake:
             guard let handshake = Handshake(from: payload) else {

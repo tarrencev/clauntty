@@ -117,4 +117,24 @@ public enum PacketWriter {
         packet.append(0)
         return packet
     }
+
+    // MARK: - Power Management
+
+    /// Create a pause packet to stop terminal output streaming
+    /// Used for battery optimization when tab is inactive
+    public static func pause() -> Data {
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
+        packet.append(MessageType.pause.rawValue)
+        packet.append(0)
+        return packet
+    }
+
+    /// Create a resume packet to resume terminal output streaming
+    /// rtach will flush any buffered output since pause
+    public static func resume() -> Data {
+        var packet = Data(capacity: ProtocolConstants.clientHeaderSize)
+        packet.append(MessageType.resume.rawValue)
+        packet.append(0)
+        return packet
+    }
 }

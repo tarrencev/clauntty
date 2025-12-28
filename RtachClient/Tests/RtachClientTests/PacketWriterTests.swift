@@ -196,4 +196,22 @@ final class PacketWriterTests: XCTestCase {
         XCTAssertEqual(packet[0], MessageType.requestScrollback.rawValue) // type = 5
         XCTAssertEqual(packet[1], 0)
     }
+
+    // MARK: - Pause/Resume Tests
+
+    func testPause() {
+        let packet = PacketWriter.pause()
+
+        XCTAssertEqual(packet.count, 2)
+        XCTAssertEqual(packet[0], MessageType.pause.rawValue) // type = 8
+        XCTAssertEqual(packet[1], 0) // len = 0
+    }
+
+    func testResume() {
+        let packet = PacketWriter.resume()
+
+        XCTAssertEqual(packet.count, 2)
+        XCTAssertEqual(packet[0], MessageType.resume.rawValue) // type = 9
+        XCTAssertEqual(packet[1], 0) // len = 0
+    }
 }

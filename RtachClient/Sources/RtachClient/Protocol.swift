@@ -20,6 +20,10 @@ public enum MessageType: UInt8, Sendable {
     case requestScrollbackPage = 6
     /// Upgrade to framed protocol mode
     case upgrade = 7
+    /// Pause terminal output streaming (battery optimization)
+    case pause = 8
+    /// Resume terminal output streaming
+    case resume = 9
 }
 
 // MARK: - Server → Client Response Types
@@ -34,6 +38,8 @@ public enum ResponseType: UInt8, Sendable {
     case command = 2
     /// Paginated scrollback with metadata
     case scrollbackPage = 3
+    /// Shell is idle (waiting for input, no PTY output for 2s)
+    case idle = 4
     /// Protocol handshake
     case handshake = 255
 }

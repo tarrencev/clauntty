@@ -222,6 +222,52 @@ final class RtachSessionTests: XCTestCase {
         XCTAssertEqual(delegate.sentData[0], PacketWriter.detach())
     }
 
+    // MARK: - Pause/Resume Tests
+
+    func testSendPause() {
+        session.connect()
+        session.processIncomingData(makeHandshake())
+        delegate.sentData.removeAll()
+
+        session.sendPause()
+
+        XCTAssertEqual(delegate.sentData.count, 1)
+        XCTAssertEqual(delegate.sentData[0], PacketWriter.pause())
+    }
+
+    func testSendResume() {
+        session.connect()
+        session.processIncomingData(makeHandshake())
+        delegate.sentData.removeAll()
+
+        session.sendResume()
+
+        XCTAssertEqual(delegate.sentData.count, 1)
+        XCTAssertEqual(delegate.sentData[0], PacketWriter.resume())
+    }
+
+    func testPauseIgnoredInRawMode() {
+        session.connect()
+        // Don't send handshake - stay in raw mode
+        delegate.sentData.removeAll()
+
+        session.sendPause()
+
+        // Should not send pause packet in raw mode
+        XCTAssertTrue(delegate.sentData.isEmpty)
+    }
+
+    func testResumeIgnoredInRawMode() {
+        session.connect()
+        // Don't send handshake - stay in raw mode
+        delegate.sentData.removeAll()
+
+        session.sendResume()
+
+        // Should not send resume packet in raw mode
+        XCTAssertTrue(delegate.sentData.isEmpty)
+    }
+
     // MARK: - Incoming Data Handling
 
     func testTerminalDataForwardedToDelegate() {
@@ -272,6 +318,16 @@ final class RtachSessionTests: XCTestCase {
 
         XCTAssertEqual(delegate.commands.count, 1)
         XCTAssertEqual(String(data: delegate.commands[0], encoding: .utf8), "reload")
+    }
+
+    func testIdleForwardedToDelegate() {
+        session.connect()
+        session.processIncomingData(makeHandshake())
+
+        // Idle notification has no payload
+        session.processIncomingData(makeFrame(type: .idle, payload: Data()))
+
+        XCTAssertEqual(delegate.idleCount, 1)
     }
 
     func testDataIgnoredWhenDisconnected() {
@@ -396,6 +452,7 @@ final class MockDelegate: RtachSessionDelegate {
     var scrollbackPages: [(meta: ScrollbackPageMeta, data: Data)] = []
     var commands: [Data] = []
     var sentData: [Data] = []
+    var idleCount: Int = 0
 
     func rtachSession(_ session: RtachSession, didReceiveTerminalData data: Data) {
         terminalData.append(data)
@@ -413,7 +470,15 @@ final class MockDelegate: RtachSessionDelegate {
         commands.append(data)
     }
 
+    func rtachSessionDidReceiveIdle(_ session: RtachSession) {
+        idleCount += 1
+    }
+
     func rtachSession(_ session: RtachSession, sendData data: Data) {
         sentData.append(data)
+    }
+
+    func rtachSessionDidEnterFramedMode(_ session: RtachSession) {
+        // No-op for tests
     }
 }

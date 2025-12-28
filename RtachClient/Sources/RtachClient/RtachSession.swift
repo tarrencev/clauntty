@@ -14,8 +14,15 @@ public protocol RtachSessionDelegate: AnyObject {
     /// Called when a command is received from server
     func rtachSession(_ session: RtachSession, didReceiveCommand data: Data)
 
+    /// Called when shell is idle (waiting for input, no PTY output for 2s)
+    /// Used for background notifications and pre-fetching
+    func rtachSessionDidReceiveIdle(_ session: RtachSession)
+
     /// Called when data should be sent to the remote server
     func rtachSession(_ session: RtachSession, sendData data: Data)
+
+    /// Called when framed mode is established (after handshake)
+    func rtachSessionDidEnterFramedMode(_ session: RtachSession)
 }
 
 /// State machine managing rtach protocol communication
@@ -200,6 +207,9 @@ public final class RtachSession {
 
         // Switch to framed mode
         state = .framedMode(version: version)
+
+        // Notify delegate that framed mode is now active
+        delegate?.rtachSessionDidEnterFramedMode(self)
     }
 
     /// Handle parsed response
@@ -216,6 +226,9 @@ public final class RtachSession {
 
         case .command(let data):
             delegate?.rtachSession(self, didReceiveCommand: data)
+
+        case .idle:
+            delegate?.rtachSessionDidReceiveIdle(self)
 
         case .handshake(let h):
             // Handshake in framed mode - shouldn't happen but handle gracefully
@@ -292,6 +305,24 @@ public final class RtachSession {
     public func sendDetach() {
         guard isFramedMode else { return }
         let packet = PacketWriter.detach()
+        delegate?.rtachSession(self, sendData: packet)
+    }
+
+    // MARK: - Power Management
+
+    /// Pause terminal output streaming (battery optimization)
+    /// rtach will buffer output locally and send idle notifications
+    public func sendPause() {
+        guard isFramedMode else { return }
+        let packet = PacketWriter.pause()
+        delegate?.rtachSession(self, sendData: packet)
+    }
+
+    /// Resume terminal output streaming
+    /// rtach will flush any buffered output since pause
+    public func sendResume() {
+        guard isFramedMode else { return }
+        let packet = PacketWriter.resume()
         delegate?.rtachSession(self, sendData: packet)
     }
 }

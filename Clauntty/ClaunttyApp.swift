@@ -190,12 +190,24 @@ struct AppContentView: View {
             // Request background time to continue processing SSH data
             // This gives us ~30 seconds to detect when Claude finishes
             NotificationManager.shared.startBackgroundTask()
+            // Pause ALL sessions when app goes to background (battery optimization)
+            // rtach will buffer output and send idle notifications
+            for session in sessionManager.sessions {
+                session.pauseOutput()
+            }
+            Logger.clauntty.info("App backgrounded: paused all \(self.sessionManager.sessions.count) sessions")
         case .active:
             NotificationManager.shared.appIsBackgrounded = false
             NotificationManager.shared.clearAllPendingNotifications()
             NotificationManager.shared.endBackgroundTask()
             // Process any pending session switch from notification tap
             NotificationManager.shared.processPendingSessionSwitch()
+            // Resume ONLY the active session (inactive tabs stay paused for battery)
+            // Tab switching will resume other sessions when they become active
+            if let activeSession = sessionManager.activeSession {
+                activeSession.resumeOutput()
+                Logger.clauntty.info("App activated: resumed active session \(activeSession.id.uuidString.prefix(8))")
+            }
         case .inactive:
             // Transitional state, don't change background flag
             break

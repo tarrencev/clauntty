@@ -998,6 +998,23 @@ end tell
         fi
         ;;
 
+    test-pause-resume|tpr)
+        # Run pause/resume/idle test suite
+        if [ -z "$2" ]; then
+            echo "Usage: $0 test-pause-resume <connection_name>"
+            echo "Example: $0 tpr devbox"
+            exit 1
+        fi
+        "$SCRIPT_DIR/test-pause-resume.sh" "$2"
+        ;;
+
+    stream-pause-logs|spl)
+        # Stream logs filtered for pause/resume/idle messages
+        echo -e "${BLUE}Streaming pause/resume/idle logs (Ctrl+C to stop)...${NC}"
+        xcrun simctl spawn booted log stream --level debug \
+            --predicate 'subsystem == "com.clauntty" AND (message CONTAINS "pause" OR message CONTAINS "resume" OR message CONTAINS "idle" OR message CONTAINS "backgrounded" OR message CONTAINS "activated")'
+        ;;
+
     help|*)
         cat <<EOF
 Clauntty Simulator CLI (uses IDB - runs in background, won't interrupt your work)
@@ -1069,6 +1086,11 @@ Render Testing:
   test-rotation|tr         Full rotation render test (portrait -> landscape -> portrait)
   test-rotation-stress|trs Stress test with multiple rotations, prints text each time
                            Usage: trs [connection] [num_rotations]
+
+Power Management Testing:
+  test-pause-resume|tpr    Test pause/resume/idle functionality
+                           Usage: tpr <connection_name>
+  stream-pause-logs|spl    Stream logs filtered for pause/resume/idle messages
 
 Examples:
   $0 debug devbox                    # Full debug cycle connecting to devbox

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var notificationManager = NotificationManager.shared
+    @ObservedObject var powerManager = PowerManager.shared
     @AppStorage("sessionManagementEnabled") private var sessionManagementEnabled = true
     @Environment(\.dismiss) var dismiss
 
@@ -14,6 +15,20 @@ struct SettingsView: View {
                     Text("Sessions")
                 } footer: {
                     Text("When enabled, terminal sessions persist on the server using rtach. Reconnecting restores your session with scrollback history.")
+                }
+
+                Section {
+                    Toggle("Battery Saver", isOn: $powerManager.batterySaverEnabled)
+                } header: {
+                    Text("Performance")
+                } footer: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Reduces rendering frequency to extend battery life.")
+                        if powerManager.currentMode == .lowPower && !powerManager.batterySaverEnabled {
+                            Text("Currently active due to low battery, thermal throttling, or iOS Low Power Mode.")
+                                .foregroundColor(.orange)
+                        }
+                    }
                 }
 
                 Section {

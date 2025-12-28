@@ -45,22 +45,43 @@ iOS SSH terminal using **libghostty** for GPU-accelerated rendering + **SwiftNIO
 
 ## Build Commands
 
+**Always use `./scripts/sim.sh` instead of raw `xcrun simctl` or `xcodebuild` commands.**
+
 ```bash
 # Build GhosttyKit (after ghostty changes)
 cd ../ghostty && zig build -Demit-xcframework
 
-# Build Clauntty
-xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
-  -destination 'platform=iOS Simulator,name=iPhone 17' -quiet build
+# Build & Run (use sim.sh)
+./scripts/sim.sh build              # Build app
+./scripts/sim.sh run                # Build, install, launch
+./scripts/sim.sh debug devbox       # Full cycle: build, install, launch, screenshot, logs
+./scripts/sim.sh quick devbox       # Skip build, just reinstall (faster iteration)
 
-# Run in simulator
-xcrun simctl boot "iPhone 17" 2>/dev/null || true
-xcrun simctl install booted ~/Library/Developer/Xcode/DerivedData/Clauntty-*/Build/Products/Debug-iphonesimulator/Clauntty.app
-xcrun simctl launch booted com.clauntty.app
+# Multi-Tab Debugging (last tab is active on launch)
+./scripts/sim.sh debug devbox --tabs "0,1"    # 2 existing sessions (tab 2 active)
+./scripts/sim.sh debug devbox --tabs "0,new"  # 1 existing + 1 new (new tab active)
+./scripts/sim.sh tap-tab 1 2                   # Switch to tab 1 (of 2 total)
+./scripts/sim.sh run-tab 1 2 "ls -la"         # Run command in tab 1
+
+# Logs & Screenshots
+./scripts/sim.sh logs 30s            # Show last 30 seconds
+./scripts/sim.sh screenshot myshot   # Save screenshot
+
+# See all commands
+./scripts/sim.sh help
 
 # Run tests
 xcodebuild test -project Clauntty.xcodeproj -scheme ClaunttyTests \
   -destination 'platform=iOS Simulator,name=iPhone 17'
+
+# Build for physical iPhone
+xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
+  -destination 'platform=iOS,name=iPhone 16' -quiet build
+
+# Install and launch on iPhone
+xcrun devicectl device install app --device "iPhone 16" \
+  ~/Library/Developer/Xcode/DerivedData/Clauntty-*/Build/Products/Debug-iphoneos/Clauntty.app
+xcrun devicectl device process launch --device "iPhone 16" com.clauntty.app
 ```
 
 ## Logging & Debugging
@@ -88,9 +109,6 @@ The app uses a tiered logging system optimized for performance:
 # sim.sh automatically enables verbose logging
 ./scripts/sim.sh debug devbox
 
-# Or launch manually with verbose logging
-SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted com.clauntty.app
-
 # In Xcode: Edit Scheme → Run → Arguments → Environment Variables
 # Add: CLAUNTTY_VERBOSE = 1
 ```
@@ -98,15 +116,13 @@ SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted com.clauntty.app
 ### Log Commands
 
 ```bash
-# Stream app logs
-xcrun simctl spawn booted log stream --level=info \
-  --predicate 'subsystem == "com.clauntty" OR subsystem == "com.mitchellh.ghostty"'
-
-# View recent logs
-xcrun simctl spawn booted log show --predicate 'subsystem == "com.clauntty"' --last 5m
+# Use sim.sh for logs (preferred)
+./scripts/sim.sh logs           # Stream logs (Ctrl+C to stop)
+./scripts/sim.sh logs 30s       # Show last 30 seconds
+./scripts/sim.sh logs 5m        # Show last 5 minutes
 
 # Screenshot
-xcrun simctl io booted screenshot /tmp/clauntty.png
+./scripts/sim.sh screenshot myshot   # Save to screenshots/myshot.png
 
 # Parse crash reports (simulator)
 uv run scripts/parse_crash.py --latest        # Formatted view
@@ -117,6 +133,8 @@ idevicecrashreport -e /tmp/clauntty_crashes   # Pull all crashes to folder
 ls /tmp/clauntty_crashes | grep -i clauntty   # List Clauntty crashes
 uv run scripts/parse_crash.py /tmp/clauntty_crashes/Clauntty-YYYY-MM-DD-HHMMSS.ips
 ```
+
+Expected: idle ~2 FPS (cursor blink), active output 30-100 FPS, low power max 33 FPS.
 
 ## GhosttyKit API
 

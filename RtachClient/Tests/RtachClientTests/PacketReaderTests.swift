@@ -233,6 +233,19 @@ final class PacketReaderTests: XCTestCase {
         }
     }
 
+    func testIdleResponse() {
+        // Idle notification has no payload
+        let frame = makeFrame(type: .idle, payload: Data())
+        let responses = reader.process(frame)
+
+        XCTAssertEqual(responses.count, 1)
+        if case .idle = responses[0] {
+            // Success - idle response parsed correctly
+        } else {
+            XCTFail("Expected idle response")
+        }
+    }
+
     // MARK: - Reset
 
     func testReset() {

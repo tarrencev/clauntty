@@ -127,15 +127,20 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
-    // MARK: - Input Detection (Inactivity-based)
+    // MARK: - Input Detection
+    // When rtach is running (framed mode), idle detection is handled server-side.
+    // rtach sends idle notifications after 2s of no PTY output.
+    // Local timer-based detection is only used for non-rtach connections.
 
-    /// Whether the terminal is waiting for user input (detected via inactivity timeout)
+    /// Whether the terminal is waiting for user input
+    /// Set by: rtach idle notification (framed mode) or local inactivity timer (raw mode)
     @Published private(set) var isWaitingForInput: Bool = false
 
-    /// Timer for detecting inactivity after output stops
+    /// Timer for detecting inactivity after output stops (only used when rtach is not running)
     private var inactivityTimer: Timer?
 
     /// How long to wait after output stops before considering terminal idle (seconds)
+    /// Only used for non-rtach connections; rtach uses 2s server-side threshold
     private let inactivityThreshold: TimeInterval = 1.5
 
     // MARK: - SSH Channel
@@ -158,6 +163,17 @@ class Session: ObservableObject, Identifiable {
     /// Initial terminal size to use when connecting (rows, columns)
     /// Set this before connecting for correct initial PTY size
     var initialTerminalSize: (rows: Int, columns: Int) = (30, 60)
+
+    // MARK: - Power Management
+
+    /// Whether output streaming is paused (tab is inactive/backgrounded)
+    private(set) var isPaused: Bool = false
+
+    /// Whether we're pre-fetching after idle (need to re-pause after receiving data)
+    private var isPrefetchingOnIdle: Bool = false
+
+    /// Whether we want to pause but are waiting for framed mode to be established
+    private var pendingPause: Bool = false
 
     // MARK: - rtach Session
 
@@ -418,6 +434,13 @@ class Session: ObservableObject, Identifiable {
 
         // Forward to terminal
         onDataReceived?(data)
+
+        // If we were pre-fetching on idle, re-pause now that we have the data
+        if isPrefetchingOnIdle {
+            isPrefetchingOnIdle = false
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pre-fetch complete, re-pausing")
+            rtachProtocol.sendPause()
+        }
     }
 
     /// Handle a command received from rtach via command pipe
@@ -453,7 +476,11 @@ class Session: ObservableObject, Identifiable {
             isWaitingForInput = false
         }
 
-        // Schedule timer to check for idle state
+        // Skip local idle detection when rtach is handling it server-side
+        // rtach sends idle notifications which are more accurate (monitors PTY directly)
+        guard !rtachProtocol.isFramedMode else { return }
+
+        // Schedule timer to check for idle state (only for non-rtach connections)
         inactivityTimer = Timer.scheduledTimer(withTimeInterval: inactivityThreshold, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 self?.checkIfWaitingForInput()
@@ -523,6 +550,44 @@ class Session: ObservableObject, Identifiable {
         rtachProtocol.sendWindowSize(size)
 
         Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): window change \(columns)x\(rows)")
+    }
+
+    // MARK: - Power Management
+
+    /// Pause terminal output streaming (for inactive tabs/backgrounded app)
+    /// rtach will buffer output locally and send idle notifications
+    func pauseOutput() {
+        guard !isPaused else {
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pauseOutput skipped (already paused)")
+            return
+        }
+        guard rtachProtocol.isFramedMode else {
+            // Not in framed mode yet - remember to pause after handshake
+            pendingPause = true
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pauseOutput deferred (not framed mode yet)")
+            return
+        }
+
+        pendingPause = false
+        isPaused = true
+        isPrefetchingOnIdle = false
+        rtachProtocol.sendPause()
+        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): paused output streaming")
+    }
+
+    /// Resume terminal output streaming (when tab becomes active)
+    /// rtach will flush any buffered output since pause
+    func resumeOutput() {
+        // Clear pending pause if we're resuming before framed mode
+        pendingPause = false
+
+        guard isPaused else { return }
+        guard rtachProtocol.isFramedMode else { return }
+
+        isPaused = false
+        isPrefetchingOnIdle = false
+        rtachProtocol.sendResume()
+        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): resumed output streaming")
     }
 
     // MARK: - Scrollback Request
@@ -648,11 +713,54 @@ extension Session: RtachClient.RtachSessionDelegate {
         // The upgrade packet must be sent BEFORE we start framing keyboard input
         if Thread.isMainThread {
             MainActor.assumeIsolated {
-                self.channelHandler?.sendToRemote(data)
+                if let handler = self.channelHandler {
+                    handler.sendToRemote(data)
+                    Logger.clauntty.info("rtachSession.sendData: sent \(data.count) bytes via channelHandler")
+                } else {
+                    Logger.clauntty.warning("rtachSession.sendData: channelHandler is nil! Dropping \(data.count) bytes")
+                }
             }
         } else {
             Task { @MainActor in
-                self.channelHandler?.sendToRemote(data)
+                if let handler = self.channelHandler {
+                    handler.sendToRemote(data)
+                    Logger.clauntty.info("rtachSession.sendData (async): sent \(data.count) bytes via channelHandler")
+                } else {
+                    Logger.clauntty.warning("rtachSession.sendData (async): channelHandler is nil! Dropping \(data.count) bytes")
+                }
+            }
+        }
+    }
+
+    nonisolated func rtachSessionDidReceiveIdle(_ session: RtachClient.RtachSession) {
+        Task { @MainActor in
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): received idle notification from rtach")
+
+            // Mark as waiting for input
+            self.isWaitingForInput = true
+
+            // Check for notification (same logic as inactivity detection)
+            self.checkNotificationForWaitingInput()
+
+            // Pre-fetch buffered data if we're paused
+            // This ensures instant tab switch by getting data before user activates tab
+            if self.isPaused {
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pre-fetching buffered data on idle")
+                self.isPrefetchingOnIdle = true
+                self.rtachProtocol.sendResume()
+                // After receiving buffered data, we'll re-pause in processTerminalData
+            }
+        }
+    }
+
+    nonisolated func rtachSessionDidEnterFramedMode(_ session: RtachClient.RtachSession) {
+        Task { @MainActor in
+            Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): entered framed mode")
+
+            // Check if we have a pending pause request
+            if self.pendingPause {
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): applying deferred pause")
+                self.pauseOutput()
             }
         }
     }
