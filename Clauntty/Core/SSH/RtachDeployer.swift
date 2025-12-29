@@ -501,19 +501,50 @@ class RtachDeployer {
 
     // MARK: - Private
 
-    private func getRemoteArch() async throws -> String {
-        let output = try await connection.executeCommand("uname -m")
-        let arch = output.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Remote platform info (OS and architecture)
+    struct RemotePlatform {
+        let os: String      // "linux" or "darwin"
+        let arch: String    // "x86_64" or "aarch64"
+    }
+
+    private func getRemotePlatform() async throws -> RemotePlatform {
+        let output = try await connection.executeCommand("uname -sm")
+        let parts = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+        guard parts.count >= 2 else {
+            throw RtachDeployError.unsupportedArchitecture(output)
+        }
+
+        let osName = String(parts[0]).lowercased()
+        let archName = String(parts[1])
+
+        // Normalize OS
+        let os: String
+        switch osName {
+        case "linux":
+            os = "linux"
+        case "darwin":
+            os = "darwin"
+        default:
+            throw RtachDeployError.unsupportedArchitecture("\(osName) \(archName)")
+        }
 
         // Normalize arch names
-        switch arch {
+        let arch: String
+        switch archName {
         case "x86_64", "amd64":
-            return "x86_64"
+            arch = "x86_64"
         case "aarch64", "arm64":
-            return "aarch64"
+            arch = "aarch64"
         default:
-            throw RtachDeployError.unsupportedArchitecture(arch)
+            throw RtachDeployError.unsupportedArchitecture(archName)
         }
+
+        return RemotePlatform(os: os, arch: arch)
+    }
+
+    private func getRemoteArch() async throws -> String {
+        let platform = try await getRemotePlatform()
+        return platform.arch
     }
 
     private func rtachExists() async throws -> Bool {
@@ -549,12 +580,15 @@ class RtachDeployer {
     }
 
     private func deploy(arch: String) async throws {
+        // Get full platform info for binary selection
+        let platform = try await getRemotePlatform()
+
         // Get the binary from app bundle
-        guard let binaryData = loadBundledBinary(for: arch) else {
-            throw RtachDeployError.binaryNotFound(arch)
+        guard let binaryData = loadBundledBinary(for: platform) else {
+            throw RtachDeployError.binaryNotFound("\(platform.os)-\(platform.arch)")
         }
 
-        Logger.clauntty.info("Uploading rtach binary (\(binaryData.count) bytes)...")
+        Logger.clauntty.info("Uploading rtach binary for \(platform.os)-\(platform.arch) (\(binaryData.count) bytes)...")
 
         // Create directory
         _ = try await connection.executeCommand("mkdir -p ~/.clauntty/bin")
@@ -575,13 +609,17 @@ class RtachDeployer {
         Logger.clauntty.info("rtach deployed successfully")
     }
 
-    private func loadBundledBinary(for arch: String) -> Data? {
+    private func loadBundledBinary(for platform: RemotePlatform) -> Data? {
         let binaryName: String
-        switch arch {
-        case "x86_64":
+        switch (platform.os, platform.arch) {
+        case ("linux", "x86_64"):
             binaryName = "rtach-x86_64-linux-musl"
-        case "aarch64":
+        case ("linux", "aarch64"):
             binaryName = "rtach-aarch64-linux-musl"
+        case ("darwin", "x86_64"):
+            binaryName = "rtach-x86_64-macos"
+        case ("darwin", "aarch64"):
+            binaryName = "rtach-aarch64-macos"
         default:
             return nil
         }

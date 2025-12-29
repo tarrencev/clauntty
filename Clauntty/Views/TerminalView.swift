@@ -84,17 +84,30 @@ struct TerminalView: View {
                     // Force re-render when session connects/reconnects
                     // This fixes blank/partial rendering after reconnection
                     if case .connected = newState {
-                        Logger.clauntty.debugOnly("Session state changed to connected, forcing redraw")
+                        Logger.clauntty.debugOnly("Session state changed to connected, forcing redraw (from \(String(describing: oldState)))")
+
+                        // First redraw after short delay
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             surfaceHolder.surface?.forceRedraw()
                         }
 
-                        // Send correct terminal size now that channel exists
-                        // This fixes PTY size mismatch when auto-connect ran before surface was ready
-                        if let surface = surfaceHolder.surface {
-                            let size = surface.terminalSize
-                            Logger.clauntty.debugOnly("Session connected, sending window change: \(size.columns)x\(size.rows)")
-                            session.sendWindowChange(rows: size.rows, columns: size.columns)
+                        // Second redraw after scrollback has time to load
+                        // This is especially important after reconnect when rtach sends scrollback
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            surfaceHolder.surface?.forceRedraw()
+
+                            // Send SIGWINCH after scrollback is processed
+                            // This triggers TUI apps (like Claude Code) to repaint
+                            if let surface = surfaceHolder.surface {
+                                let size = surface.terminalSize
+                                Logger.clauntty.debugOnly("Session connected, sending window change: \(size.columns)x\(size.rows)")
+                                session.sendWindowChange(rows: size.rows, columns: size.columns)
+                            }
+                        }
+
+                        // Third redraw in case of slow scrollback
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            surfaceHolder.surface?.forceRedraw()
                         }
                     }
                 }

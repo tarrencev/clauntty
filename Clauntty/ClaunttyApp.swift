@@ -202,9 +202,16 @@ struct AppContentView: View {
             NotificationManager.shared.endBackgroundTask()
             // Process any pending session switch from notification tap
             NotificationManager.shared.processPendingSessionSwitch()
-            // Resume ONLY the active session (inactive tabs stay paused for battery)
-            // Tab switching will resume other sessions when they become active
-            if let activeSession = sessionManager.activeSession {
+
+            // Check for ANY disconnected sessions and reconnect them
+            let disconnectedSessions = sessionManager.sessions.filter { $0.state == .disconnected }
+            if !disconnectedSessions.isEmpty {
+                Logger.clauntty.info("App activated: found \(disconnectedSessions.count) disconnected sessions, attempting reconnect")
+                Task {
+                    await sessionManager.reconnectDisconnectedSessions()
+                }
+            } else if let activeSession = sessionManager.activeSession {
+                // No disconnected sessions - just resume the active one
                 activeSession.resumeOutput()
                 Logger.clauntty.info("App activated: resumed active session \(activeSession.id.uuidString.prefix(8))")
             }

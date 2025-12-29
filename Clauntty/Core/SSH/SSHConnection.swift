@@ -195,16 +195,18 @@ class SSHConnection: ObservableObject {
     ///   - terminalSize: Initial terminal size (rows, columns). Defaults to reasonable mobile size.
     ///   - command: Optional command to execute (uses ExecRequest). If nil, uses ShellRequest.
     ///   - onDataReceived: Callback for received data
+    ///   - onChannelInactive: Callback when channel becomes inactive (connection lost)
     func createChannel(
         terminalSize: (rows: Int, columns: Int) = (30, 60),
         command: String? = nil,
-        onDataReceived: @escaping (Data) -> Void
+        onDataReceived: @escaping (Data) -> Void,
+        onChannelInactive: (() -> Void)? = nil
     ) async throws -> (Channel, SSHChannelHandler) {
         guard let channel = self.channel, channel.isActive else {
             throw SSHError.notConnected
         }
 
-        let handler = SSHChannelHandler(onDataReceived: onDataReceived)
+        let handler = SSHChannelHandler(onDataReceived: onDataReceived, onChannelInactive: onChannelInactive)
 
         let childChannel = try await channel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler -> EventLoopFuture<Channel> in
             let promise = channel.eventLoop.makePromise(of: Channel.self)
@@ -404,10 +406,14 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
     /// Callback when data is received from SSH
     private let onDataReceived: ((Data) -> Void)?
 
+    /// Callback when channel becomes inactive (connection lost)
+    private let onChannelInactive: (() -> Void)?
+
     private var context: ChannelHandlerContext?
 
-    init(onDataReceived: ((Data) -> Void)?) {
+    init(onDataReceived: ((Data) -> Void)?, onChannelInactive: (() -> Void)? = nil) {
         self.onDataReceived = onDataReceived
+        self.onChannelInactive = onChannelInactive
     }
 
     func handlerAdded(context: ChannelHandlerContext) {
@@ -453,8 +459,15 @@ final class SSHChannelHandler: ChannelInboundHandler, @unchecked Sendable {
         }
     }
 
+    func channelInactive(context: ChannelHandlerContext) {
+        Logger.clauntty.info("SSH channel became inactive (connection lost)")
+        DispatchQueue.main.async { [weak self] in
+            self?.onChannelInactive?()
+        }
+    }
+
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        print("SSH channel error: \(error)")
+        Logger.clauntty.error("SSH channel error: \(error)")
         context.close(promise: nil)
     }
 }

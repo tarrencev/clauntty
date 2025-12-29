@@ -157,35 +157,47 @@ class SessionManager: ObservableObject {
         // Each session gets its own SSH connection to avoid killing other sessions' channels
         session.sshConnection = connection
 
-        // Build rtach command
+        // Build rtach command (only if deployer is available)
         var shellCommand: String? = nil
+        var usingRtach = false
         if useRtach, let deployer = rtachDeployers[poolKey] {
             // Use session's rtach ID, or generate new UUID for new session
             let sessionId = session.rtachSessionId ?? UUID().uuidString
             // Store back so we can track which rtach session this tab is using
             session.rtachSessionId = sessionId
             shellCommand = deployer.shellCommand(sessionId: sessionId)
+            usingRtach = true
             Logger.clauntty.info("SessionManager: using rtach session: \(sessionId.prefix(8))...")
 
             // Update last accessed time for this session (use fresh connection)
             // The deployer's cached connection might be stale, so create a new deployer
             let freshDeployer = RtachDeployer(connection: connection)
             try? await freshDeployer.updateLastAccessed(sessionId: sessionId)
+        } else if useRtach {
+            // rtach is enabled but deployment failed - fallback to plain SSH
+            Logger.clauntty.warning("SessionManager: rtach deployment not available, falling back to plain SSH (no session persistence)")
         }
 
         // Create a new channel for this session with the correct terminal size
-        Logger.clauntty.info("SessionManager: creating channel for \(session.id.uuidString.prefix(8)), command=\(shellCommand ?? "shell")")
+        Logger.clauntty.info("SessionManager: creating channel for \(session.id.uuidString.prefix(8)), command=\(shellCommand ?? "shell"), rtach=\(usingRtach)")
         let (channel, handler) = try await connection.createChannel(
             terminalSize: session.initialTerminalSize,
-            command: shellCommand
-        ) { [weak session] data in
-            Task { @MainActor in
-                session?.handleDataReceived(data)
+            command: shellCommand,
+            onDataReceived: { [weak session] data in
+                Task { @MainActor in
+                    session?.handleDataReceived(data)
+                }
+            },
+            onChannelInactive: { [weak session] in
+                Task { @MainActor in
+                    Logger.clauntty.info("Session \(session?.id.uuidString.prefix(8) ?? "nil"): channel became inactive, marking disconnected")
+                    session?.handleChannelInactive()
+                }
             }
-        }
+        )
         Logger.clauntty.info("SessionManager: channel created for \(session.id.uuidString.prefix(8))")
 
-        session.attach(channel: channel, handler: handler, connection: connection, expectsRtach: useRtach)
+        session.attach(channel: channel, handler: handler, connection: connection, expectsRtach: usingRtach)
 
         // Wire up OSC 777 callbacks for port forwarding
         session.onPortForwardRequested = { [weak self, weak session] port in
@@ -201,6 +213,75 @@ class SessionManager: ObservableObject {
 
         // Request notification permission on first session connect
         await NotificationManager.shared.requestAuthorizationIfNeeded()
+    }
+
+    /// Reconnect a disconnected session
+    /// Uses the session's existing rtach session ID to reattach
+    func reconnect(session: Session) async throws {
+        guard session.state == .disconnected else {
+            Logger.clauntty.info("SessionManager: session \(session.id.uuidString.prefix(8)) not disconnected, skipping reconnect")
+            return
+        }
+
+        guard let rtachSessionId = session.rtachSessionId else {
+            Logger.clauntty.warning("SessionManager: session \(session.id.uuidString.prefix(8)) has no rtach session ID, cannot reconnect")
+            throw SessionError.notConnected
+        }
+
+        Logger.clauntty.info("SessionManager: reconnecting session \(session.id.uuidString.prefix(8)) to rtach session \(rtachSessionId.prefix(8))")
+
+        // Ensure rtach deployer exists for this connection
+        let config = session.connectionConfig
+        let poolKey = connectionKey(for: config)
+
+        if rtachDeployers[poolKey] == nil {
+            // Need to reconnect SSH and redeploy rtach
+            let connection = SSHConnection(
+                host: config.host,
+                port: config.port,
+                username: config.username,
+                authMethod: config.authMethod,
+                connectionId: config.id
+            )
+            try await connection.connect()
+            connectionPool[poolKey] = connection
+
+            let deployer = RtachDeployer(connection: connection)
+            try await deployer.ensureDeployed()
+            rtachDeployers[poolKey] = deployer
+        }
+
+        // Reconnect using existing rtach session ID
+        try await connect(session: session, rtachSessionId: rtachSessionId)
+    }
+
+    /// Reconnect all disconnected sessions
+    /// Called when app returns to foreground after background timeout
+    func reconnectDisconnectedSessions() async {
+        let disconnectedSessions = sessions.filter { $0.state == .disconnected }
+
+        if disconnectedSessions.isEmpty {
+            Logger.clauntty.info("SessionManager: no disconnected sessions to reconnect")
+            return
+        }
+
+        Logger.clauntty.info("SessionManager: reconnecting \(disconnectedSessions.count) disconnected sessions")
+
+        for session in disconnectedSessions {
+            do {
+                try await reconnect(session: session)
+                Logger.clauntty.info("SessionManager: reconnected session \(session.id.uuidString.prefix(8))")
+
+                // Resume the active session after reconnect (others stay paused for battery)
+                if activeTab == .terminal(session.id) {
+                    session.resumeOutput()
+                    Logger.clauntty.info("SessionManager: resumed active session \(session.id.uuidString.prefix(8)) after reconnect")
+                }
+            } catch {
+                Logger.clauntty.error("SessionManager: failed to reconnect session \(session.id.uuidString.prefix(8)): \(error.localizedDescription)")
+                // Keep session in disconnected state, user can try again
+            }
+        }
     }
 
     /// Close a session

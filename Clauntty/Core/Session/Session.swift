@@ -324,6 +324,20 @@ class Session: ObservableObject, Identifiable {
         rtachProtocol.processIncomingData(data)
     }
 
+    /// Handle SSH channel becoming inactive (connection lost)
+    /// This is called when the underlying TCP connection dies (e.g., after background timeout)
+    func handleChannelInactive() {
+        Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): handling channel inactive")
+
+        // Clear channel references
+        sshChannel = nil
+        channelHandler = nil
+
+        // Update state to disconnected
+        state = .disconnected
+        onStateChanged?(state)
+    }
+
     // MARK: - Loading Indicator
 
     /// Whether we're currently loading a large amount of data (show loading indicator)
@@ -472,7 +486,8 @@ class Session: ObservableObject, Identifiable {
         inactivityTimer?.invalidate()
 
         // If we were waiting for input, we're not anymore (got output)
-        if isWaitingForInput {
+        // BUT: don't reset during pre-fetch - that's just catching up on buffered data
+        if isWaitingForInput && !isPrefetchingOnIdle {
             isWaitingForInput = false
         }
 
@@ -735,6 +750,15 @@ extension Session: RtachClient.RtachSessionDelegate {
     nonisolated func rtachSessionDidReceiveIdle(_ session: RtachClient.RtachSession) {
         Task { @MainActor in
             Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): received idle notification from rtach")
+
+            // Reset pre-fetch state if we receive idle while still in pre-fetch mode
+            // This handles the case where server had no buffered data
+            if self.isPrefetchingOnIdle {
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): pre-fetch had no data, resetting")
+                self.isPrefetchingOnIdle = false
+                // Re-pause since we're still inactive
+                self.rtachProtocol.sendPause()
+            }
 
             // Mark as waiting for input
             self.isWaitingForInput = true

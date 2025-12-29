@@ -559,6 +559,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Listen for keyboard show/hide to resize terminal
         setupKeyboardNotifications()
 
+        // Listen for app lifecycle to stop rendering when backgrounded
+        setupAppLifecycleNotifications()
+
         // Add tap gesture for keyboard and paste menu
         let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         addGestureRecognizer(tapGesture)
@@ -584,6 +587,48 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Subscribe to power mode changes for battery optimization
         setupPowerModeObserver()
+
+        // Setup selection handles for adjusting text selection
+        setupSelectionHandles()
+    }
+
+    // MARK: - App Lifecycle (Background/Foreground)
+
+    private func setupAppLifecycleNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    @objc private func appDidEnterBackground() {
+        isAppBackgrounded = true
+        guard let surface = self.surface else { return }
+        // Tell Ghostty the surface is not visible - stops the renderer
+        // This prevents the renderer from holding mutex when iOS suspends threads
+        ghostty_surface_set_occlusion(surface, false)
+        Logger.clauntty.info("Surface occluded (app backgrounded)")
+    }
+
+    @objc private func appWillEnterForeground() {
+        isAppBackgrounded = false
+        guard let surface = self.surface else { return }
+        // Only resume rendering if this is the active tab
+        // Inactive tabs stay occluded to prevent mutex contention
+        if isActiveTab {
+            ghostty_surface_set_occlusion(surface, true)
+            Logger.clauntty.info("Surface visible (app foregrounded, active tab)")
+        } else {
+            Logger.clauntty.info("Surface stays occluded (app foregrounded, inactive tab)")
+        }
     }
 
     // MARK: - Power Mode
@@ -654,6 +699,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             Logger.clauntty.debugOnly("Font size increased to \(self.currentFontSize)")
             // Notify SSH of new terminal size after font change
             notifyTerminalSizeChanged(surface: surface)
+            // Update selection handles after font change (positions change)
+            // Use delayed update to ensure Ghostty has recalculated positions
+            scheduleSelectionHandleUpdate()
         }
     }
 
@@ -666,6 +714,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             Logger.clauntty.debugOnly("Font size decreased to \(self.currentFontSize)")
             // Notify SSH of new terminal size after font change
             notifyTerminalSizeChanged(surface: surface)
+            // Update selection handles after font change (positions change)
+            // Use delayed update to ensure Ghostty has recalculated positions
+            scheduleSelectionHandleUpdate()
         }
     }
 
@@ -754,6 +805,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         ghostty_surface_mouse_pos(surface, 0, 0, GHOSTTY_MODS_NONE)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
         _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        hideSelectionHandles()
     }
 
     // MARK: - Selection & Copy/Paste
@@ -763,6 +815,214 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Track if edit menu is currently visible
     private var isEditMenuVisible = false
+
+    /// Selection handle views for adjusting selection bounds
+    private lazy var startHandle: SelectionHandleView = {
+        let handle = SelectionHandleView(type: .start)
+        handle.isHidden = true
+        handle.onDragBegan = { [weak self] in
+            self?.handleSelectionHandleDragBegan()
+        }
+        handle.onDrag = { [weak self] point in
+            self?.handleStartHandleDrag(to: point)
+        }
+        handle.onDragEnded = { [weak self] in
+            self?.handleSelectionHandleDragEnded()
+        }
+        return handle
+    }()
+
+    private lazy var endHandle: SelectionHandleView = {
+        let handle = SelectionHandleView(type: .end)
+        handle.isHidden = true
+        handle.onDragBegan = { [weak self] in
+            self?.handleSelectionHandleDragBegan()
+        }
+        handle.onDrag = { [weak self] point in
+            self?.handleEndHandleDrag(to: point)
+        }
+        handle.onDragEnded = { [weak self] in
+            self?.handleSelectionHandleDragEnded()
+        }
+        return handle
+    }()
+
+    /// Track selection bounds for handle dragging
+    private var selectionStartPoint: CGPoint = .zero
+    private var selectionEndPoint: CGPoint = .zero
+
+    /// Track which handle is being dragged (for continuous drag)
+    private enum DraggingHandle { case none, start, end }
+    private var draggingHandle: DraggingHandle = .none
+
+    /// Last drag position for final update
+    private var lastDragPoint: CGPoint = .zero
+
+    private func setupSelectionHandles() {
+        addSubview(startHandle)
+        addSubview(endHandle)
+    }
+
+    private func showSelectionHandles() {
+        guard let surface = self.surface else { return }
+        guard ghostty_surface_has_selection(surface) else {
+            hideSelectionHandles()
+            return
+        }
+
+        // Get selection pixel bounds from Ghostty
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else {
+            hideSelectionHandles()
+            return
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        // Check if selection is visible (valid pixel coordinates)
+        guard text.tl_px_x >= 0 && text.tl_px_y >= 0 &&
+              text.br_px_x >= 0 && text.br_px_y >= 0 else {
+            hideSelectionHandles()
+            return
+        }
+
+        // Store positions for drag handling
+        selectionStartPoint = CGPoint(x: text.tl_px_x, y: text.tl_px_y)
+        selectionEndPoint = CGPoint(x: text.br_px_x, y: text.br_px_y)
+
+        // Position and show handles
+        startHandle.positionAt(selectionStartPoint)
+        endHandle.positionAt(selectionEndPoint)
+
+        startHandle.isHidden = false
+        endHandle.isHidden = false
+
+        // Bring handles to front (above Metal layer)
+        bringSubviewToFront(startHandle)
+        bringSubviewToFront(endHandle)
+
+        // Animate appearance
+        startHandle.alpha = 0
+        endHandle.alpha = 0
+        UIView.animate(withDuration: 0.15) {
+            self.startHandle.alpha = 1
+            self.endHandle.alpha = 1
+        }
+    }
+
+    private func hideSelectionHandles() {
+        startHandle.isHidden = true
+        endHandle.isHidden = true
+    }
+
+    /// Work item for debounced handle updates
+    private var handleUpdateWorkItem: DispatchWorkItem?
+
+    /// Schedule a debounced selection handle update (for rapid zoom events)
+    private func scheduleSelectionHandleUpdate() {
+        // Cancel any pending update
+        handleUpdateWorkItem?.cancel()
+
+        // Schedule new update with short delay
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.updateSelectionHandlePositions()
+        }
+        handleUpdateWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: workItem)
+    }
+
+    /// Update handle positions from current selection bounds (e.g., after font size change)
+    private func updateSelectionHandlePositions() {
+        guard let surface = self.surface else { return }
+        guard !startHandle.isHidden else { return }  // Only update if handles are visible
+
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else {
+            hideSelectionHandles()
+            return
+        }
+        defer { ghostty_surface_free_text(surface, &text) }
+
+        guard text.tl_px_x >= 0 && text.br_px_x >= 0 else {
+            hideSelectionHandles()
+            return
+        }
+
+        selectionStartPoint = CGPoint(x: text.tl_px_x, y: text.tl_px_y)
+        selectionEndPoint = CGPoint(x: text.br_px_x, y: text.br_px_y)
+        startHandle.positionAt(selectionStartPoint)
+        endHandle.positionAt(selectionEndPoint)
+    }
+
+    private func handleSelectionHandleDragBegan() {
+        // Dismiss edit menu while dragging
+        dismissEditMenu()
+    }
+
+    private func handleStartHandleDrag(to point: CGPoint) {
+        guard let surface = self.surface else { return }
+
+        // Always update handle position visually (smooth)
+        startHandle.positionAt(point)
+        lastDragPoint = point
+
+        // On first drag event, start the selection from anchor point
+        if draggingHandle != .start {
+            draggingHandle = .start
+            // Press at anchor (end point) to start continuous drag
+            ghostty_surface_mouse_pos(surface, Double(selectionEndPoint.x), Double(selectionEndPoint.y), GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        }
+
+        // Move to current drag position (button still held)
+        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), GHOSTTY_MODS_NONE)
+    }
+
+    private func handleEndHandleDrag(to point: CGPoint) {
+        guard let surface = self.surface else { return }
+
+        // Always update handle position visually (smooth)
+        endHandle.positionAt(point)
+        lastDragPoint = point
+
+        // On first drag event, start the selection from anchor point
+        if draggingHandle != .end {
+            draggingHandle = .end
+            // Press at anchor (start point) to start continuous drag
+            ghostty_surface_mouse_pos(surface, Double(selectionStartPoint.x), Double(selectionStartPoint.y), GHOSTTY_MODS_NONE)
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        }
+
+        // Move to current drag position (button still held)
+        ghostty_surface_mouse_pos(surface, Double(point.x), Double(point.y), GHOSTTY_MODS_NONE)
+    }
+
+    private func handleSelectionHandleDragEnded() {
+        guard let surface = self.surface else { return }
+
+        // Release mouse button to finalize selection
+        if draggingHandle != .none {
+            _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
+        }
+
+        draggingHandle = .none
+
+        // Update handle positions from actual selection bounds
+        var text = ghostty_text_s()
+        if ghostty_surface_read_selection(surface, &text) {
+            if text.tl_px_x >= 0 && text.br_px_x >= 0 {
+                selectionStartPoint = CGPoint(x: text.tl_px_x, y: text.tl_px_y)
+                selectionEndPoint = CGPoint(x: text.br_px_x, y: text.br_px_y)
+                startHandle.positionAt(selectionStartPoint)
+                endHandle.positionAt(selectionEndPoint)
+            }
+            ghostty_surface_free_text(surface, &text)
+        }
+
+        // Show edit menu at end handle position
+        if ghostty_surface_has_selection(surface) {
+            showEditMenu(at: selectionEndPoint)
+        }
+    }
 
     @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
         guard let surface = self.surface else { return }
@@ -786,14 +1046,16 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
             isSelecting = false
 
-            // Show edit menu if there's a selection
+            // Show handles and edit menu if there's a selection
             if ghostty_surface_has_selection(surface) {
+                showSelectionHandles()
                 showEditMenu(at: location)
             }
 
         case .cancelled:
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
             isSelecting = false
+            hideSelectionHandles()
 
         default:
             break
@@ -898,6 +1160,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 ghostty_surface_mouse_scroll(surface, 0, Double(scrollLines), 0)
                 scrollAccumulator = scrollAccumulator.truncatingRemainder(dividingBy: scrollThreshold)
 
+                // Update selection handles after scroll (positions change)
+                updateSelectionHandlePositions()
+
                 // Check if we're near the top of scrollback (for lazy loading)
                 // Skip this when on alternate screen - no scrollback there
                 if let callback = onScrollNearTop, !isAlternateScreen {
@@ -974,6 +1239,9 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         )
         Logger.clauntty.debugOnly("layoutSubviews: effectiveSize=\(Int(effectiveSize.width))x\(Int(effectiveSize.height)), rotated=\(rotated)")
         sizeDidChange(effectiveSize)
+
+        // Update selection handles after layout change
+        updateSelectionHandlePositions()
 
         // After rotation, force aggressive refresh to fix viewport position
         if rotated {
@@ -1161,6 +1429,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Whether this surface is the active tab
     private var isActiveTab: Bool = true
 
+    /// Whether the app is currently backgrounded
+    private var isAppBackgrounded: Bool = false
+
+    /// Serial queue for terminal I/O operations
+    /// CRITICAL: ghostty_surface_write_pty_output MUST NOT be called from main thread
+    /// because it can block forever waiting for surface mailbox space, and the main
+    /// thread is the consumer of that mailbox. Calling from main = self-deadlock.
+    private let terminalIOQueue = DispatchQueue(label: "com.clauntty.terminal-io", qos: .userInteractive)
+
     /// Set whether this terminal surface is the active tab
     /// Inactive surfaces don't render their cursor and lose keyboard focus
     func setActive(_ active: Bool) {
@@ -1173,6 +1450,14 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         if active {
             // Becoming active - gain focus and show keyboard
             Logger.clauntty.debugOnly("Surface becoming active")
+
+            // Re-setup accessory bar in window (in case it was removed)
+            setupAccessoryBarInWindow()
+
+            // Show this tab's accessory bar and bring to front
+            accessoryBar.isHidden = false
+            window?.bringSubviewToFront(accessoryBar)
+
             if !isFirstResponder {
                 _ = becomeFirstResponder()
             }
@@ -1198,9 +1483,25 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
                 self.onTerminalSizeChanged?(self.terminalSize.rows, self.terminalSize.columns)
                 Logger.clauntty.debugOnly("Tab active: sent SIGWINCH to force remote redraw")
             }
+
+            // Resume rendering for this tab (unless app is backgrounded)
+            if let surface = self.surface, !isAppBackgrounded {
+                ghostty_surface_set_occlusion(surface, true)
+                Logger.clauntty.debugOnly("Tab active: surface visible")
+            }
         } else {
-            // Becoming inactive - lose focus to hide cursor
+            // Becoming inactive - lose focus to hide cursor and accessory bar
             Logger.clauntty.debugOnly("Surface becoming inactive")
+
+            // Stop rendering for inactive tabs to prevent mutex contention
+            if let surface = self.surface {
+                ghostty_surface_set_occlusion(surface, false)
+                Logger.clauntty.debugOnly("Tab inactive: surface occluded")
+            }
+
+            // Hide this tab's accessory bar (the active tab's bar will show)
+            accessoryBar.isHidden = true
+
             focusDidChange(false)
             if isFirstResponder {
                 _ = resignFirstResponder()
@@ -1254,49 +1555,31 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Write SSH output to the terminal for display
     /// This feeds data directly to Ghostty's terminal processor
+    ///
+    /// IMPORTANT: This dispatches to a background queue because ghostty_surface_write_pty_output
+    /// can block indefinitely waiting for the surface mailbox. Since the main thread consumes
+    /// that mailbox, calling from main thread would deadlock.
     func writeSSHOutput(_ data: Data) {
         guard let surface = self.surface else {
             Logger.clauntty.warning("Cannot write SSH output: no surface")
             return
         }
 
-        // Verbose logging: cursor tracking with escape sequence analysis
-        #if DEBUG
-        if Logger.verboseLoggingEnabled {
-            // Count cursor-up sequences (ESC [1A = 1b 5b 31 41) for debugging
-            var cursorUpCount = 0
-            var searchStart = data.startIndex
-            while let range = data.range(of: Data([0x1b, 0x5b, 0x31, 0x41]), in: searchStart..<data.endIndex) {
-                cursorUpCount += 1
-                searchStart = range.upperBound
-            }
+        // Dispatch to background queue to avoid main thread deadlock
+        // The surface mailbox is consumed by the main thread, so calling
+        // ghostty_surface_write_pty_output from main = self-deadlock when queue fills
+        terminalIOQueue.async { [weak self] in
+            guard self != nil else { return }
 
-            if cursorUpCount > 0 {
-                Logger.clauntty.verbose("[CURSOR] writeSSHOutput BEFORE (has \(cursorUpCount) cursor-up): \(self.getCursorInfo(surface)) size=\(data.count)")
-            }
+            Logger.clauntty.debugOnly("writeSSHOutput: processing \(data.count) bytes on terminal-io queue")
 
             data.withUnsafeBytes { buffer in
                 guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
                 ghostty_surface_write_pty_output(surface, ptr, UInt(data.count))
             }
 
-            if cursorUpCount > 0 {
-                Logger.clauntty.verbose("[CURSOR] writeSSHOutput AFTER (had \(cursorUpCount) cursor-up): \(self.getCursorInfo(surface))")
-            }
-        } else {
-            data.withUnsafeBytes { buffer in
-                guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
-                ghostty_surface_write_pty_output(surface, ptr, UInt(data.count))
-            }
+            Logger.clauntty.debugOnly("writeSSHOutput: completed \(data.count) bytes")
         }
-        #else
-        data.withUnsafeBytes { buffer in
-            guard let ptr = buffer.baseAddress?.assumingMemoryBound(to: CChar.self) else { return }
-            ghostty_surface_write_pty_output(surface, ptr, UInt(data.count))
-        }
-        #endif
-
-        Logger.clauntty.verbose("SSH output written: \(data.count) bytes")
     }
 
     /// Prepend scrollback data to the beginning of the terminal's scrollback buffer.

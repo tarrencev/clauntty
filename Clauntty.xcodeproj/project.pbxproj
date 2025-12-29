@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
+		70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297EA9CE961BFF920036934A /* SelectionHandleView.swift */; };
 		733936A7CBE2B60407C98651 /* WebTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA0CB3F10DB4D7B7DAD14D9E /* WebTab.swift */; };
 		7BFB27A8AEC758530B629ADA /* SSHConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */; };
 		7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28503FD938162D88F8B6A69F /* WebTabView.swift */; };
@@ -86,6 +87,7 @@
 /* Begin PBXFileReference section */
 		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
 		28503FD938162D88F8B6A69F /* WebTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTabView.swift; sourceTree = "<group>"; };
+		297EA9CE961BFF920036934A /* SelectionHandleView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionHandleView.swift; sourceTree = "<group>"; };
 		2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
 		59A3663E616FC97D48E5888C /* SessionPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionPickerView.swift; sourceTree = "<group>"; };
 		7856CABCC7D9170DD7EF307F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -218,22 +220,6 @@
 			path = Core;
 			sourceTree = "<group>";
 		};
-		C3000031 /* Power */ = {
-			isa = PBXGroup;
-			children = (
-				C1000026 /* PowerManager.swift */,
-			);
-			path = Power;
-			sourceTree = "<group>";
-		};
-		C3000030 /* Notifications */ = {
-			isa = PBXGroup;
-			children = (
-				C1000024 /* NotificationManager.swift */,
-			);
-			path = Notifications;
-			sourceTree = "<group>";
-		};
 		C3000003 /* SSH */ = {
 			isa = PBXGroup;
 			children = (
@@ -276,6 +262,7 @@
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
 				28503FD938162D88F8B6A69F /* WebTabView.swift */,
 				C1000025 /* SettingsView.swift */,
+				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -325,6 +312,22 @@
 				E2000003 /* ClaunttyUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		C3000030 /* Notifications */ = {
+			isa = PBXGroup;
+			children = (
+				C1000024 /* NotificationManager.swift */,
+			);
+			path = Notifications;
+			sourceTree = "<group>";
+		};
+		C3000031 /* Power */ = {
+			isa = PBXGroup;
+			children = (
+				C1000026 /* PowerManager.swift */,
+			);
+			path = Power;
 			sourceTree = "<group>";
 		};
 		E3000010 /* ClaunttyUITests */ = {
@@ -511,6 +514,7 @@
 				C0000024 /* NotificationManager.swift in Sources */,
 				C0000025 /* SettingsView.swift in Sources */,
 				C0000026 /* PowerManager.swift in Sources */,
+				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -706,7 +710,7 @@
 				DEVELOPMENT_TEAM = NZQXHAG9A3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Clauntty/Info.plist";
+				INFOPLIST_FILE = Clauntty/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Clauntty;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -736,7 +740,7 @@
 				DEVELOPMENT_TEAM = NZQXHAG9A3;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "Clauntty/Info.plist";
+				INFOPLIST_FILE = Clauntty/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Clauntty;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
