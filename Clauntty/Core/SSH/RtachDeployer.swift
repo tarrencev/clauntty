@@ -35,16 +35,14 @@ struct RtachSession: Identifiable {
 
 /// Handles deploying rtach to remote servers for session persistence
 ///
-/// TODO: Versioned binary deployment
-/// Currently, if rtach is running (sessions active), we can't update the binary ("Text file busy").
-/// Fix: Deploy to versioned path (e.g., ~/.clauntty/bin/rtach-1.4.0) and update a symlink,
-/// or let new sessions use the new binary while old sessions continue on the old one.
-/// This allows updates without killing existing sessions.
+/// Versioned binary deployment: rtach is deployed to ~/.clauntty/bin/rtach-{version}
+/// This allows updates without "Text file busy" errors - new sessions use the new binary
+/// while old sessions continue with the old one.
 class RtachDeployer {
     let connection: SSHConnection
 
-    /// Remote path where rtach is installed
-    static let remoteBinPath = "~/.clauntty/bin/rtach"
+    /// Remote path where rtach is installed (versioned to allow updates without killing sessions)
+    static var remoteBinPath: String { "~/.clauntty/bin/rtach-\(expectedVersion)" }
     static let remoteSessionsPath = "~/.clauntty/sessions"
     static let remoteMetadataPath = "~/.clauntty/sessions.json"
     static let claudeSettingsPath = "~/.claude/settings.json"
@@ -78,7 +76,9 @@ class RtachDeployer {
     /// 2.2.0 - Phase 2 network optimization complete: pause/resume/idle working
     /// 2.3.0 - OSC 0/1/2 title parsing: saves terminal title to .title file for session picker
     /// 2.4.0 - Shell integration: bash/zsh/fish set title to current directory and running command
-    static let expectedVersion = "2.4.0"
+    /// 2.5.0 - FIFO command pipe: use RTACH_CMD_PIPE instead of RTACH_CMD_FD (fixes Claude Code subprocess issue)
+    ///         Versioned binary path: allows updates without killing existing sessions
+    static let expectedVersion = "2.5.0"
 
     /// Unique client ID for this app instance (prevents duplicate connections from same device)
     /// Generated once and stored in UserDefaults - no device info leaves the app
@@ -261,7 +261,7 @@ class RtachDeployer {
     /// Deploy helper scripts for port forwarding
     private func deployHelperScripts() async throws {
         // Deploy forward-port script (handles both "8000" and "http://localhost:8000")
-        // Uses RTACH_CMD_FD pipe to send commands to Clauntty
+        // Uses RTACH_CMD_PIPE (FIFO path) to send commands to Clauntty
         _ = try await connection.executeCommand(
             "cat > ~/.clauntty/bin/forward-port << 'EOF'\n" +
             "#!/bin/bash\n" +
@@ -273,10 +273,12 @@ class RtachDeployer {
             "else\n" +
             "  port=\"$arg\"\n" +
             "fi\n" +
-            "if [ -n \"$RTACH_CMD_FD\" ]; then\n" +
-            "  echo \"forward;$port\" >&$RTACH_CMD_FD\n" +
-            "else\n" +
-            "  echo \"Error: RTACH_CMD_FD not set (not running in rtach session)\" >&2\n" +
+            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
+            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "if ! echo \"forward;$port\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
+            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
             "  exit 1\n" +
             "fi\n" +
             "echo \"Port $port forwarded\"\n" +
@@ -285,7 +287,7 @@ class RtachDeployer {
         )
 
         // Deploy open-tab script (handles both "8000" and "http://localhost:8000")
-        // Uses RTACH_CMD_FD pipe to send commands to Clauntty
+        // Uses RTACH_CMD_PIPE (FIFO path) to send commands to Clauntty
         _ = try await connection.executeCommand(
             "cat > ~/.clauntty/bin/open-tab << 'EOF'\n" +
             "#!/bin/bash\n" +
@@ -297,10 +299,12 @@ class RtachDeployer {
             "else\n" +
             "  port=\"$arg\"\n" +
             "fi\n" +
-            "if [ -n \"$RTACH_CMD_FD\" ]; then\n" +
-            "  echo \"open;$port\" >&$RTACH_CMD_FD\n" +
-            "else\n" +
-            "  echo \"Error: RTACH_CMD_FD not set (not running in rtach session)\" >&2\n" +
+            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
+            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "if ! echo \"open;$port\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
+            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
             "  exit 1\n" +
             "fi\n" +
             "echo \"Opened port $port\"\n" +
@@ -331,9 +335,11 @@ class RtachDeployer {
         var needsUpdate = false
 
         // Add PATH for helper scripts (Claude sessions only)
+        // Include /usr/bin:/bin to ensure system tools like base64 are available in Claude Code snapshots
         var env = settings["env"] as? [String: String] ?? [:]
-        if env["PATH"] == nil || !env["PATH"]!.contains(".clauntty/bin") {
-            env["PATH"] = "$HOME/.clauntty/bin:$PATH"
+        let expectedPath = "/usr/bin:/bin:$HOME/.clauntty/bin:$PATH"
+        if env["PATH"] != expectedPath {
+            env["PATH"] = expectedPath
             settings["env"] = env
             needsUpdate = true
         }
@@ -372,7 +378,7 @@ class RtachDeployer {
         if finalSettings.isEmpty {
             finalSettings = [
                 "env": [
-                    "PATH": "$HOME/.clauntty/bin:$PATH"
+                    "PATH": "/usr/bin:/bin:$HOME/.clauntty/bin:$PATH"
                 ],
                 "permissions": [
                     "allow": [

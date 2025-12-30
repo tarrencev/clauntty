@@ -12,6 +12,9 @@ class WebTab: ObservableObject, Identifiable {
     let remotePort: RemotePort
     let createdAt: Date
 
+    /// Connection config for reconnection
+    let connectionConfig: SavedConnection
+
     // MARK: - State
 
     enum State: Equatable {
@@ -121,6 +124,11 @@ class WebTab: ObservableObject, Identifiable {
         return ":\(remotePort.port)"
     }
 
+    /// Server display name for grouping in tabs view
+    var serverDisplayName: String? {
+        return sshConnection?.host
+    }
+
     /// URL string for display in expanded tab bar (port + path)
     var urlDisplayString: String {
         if let url = currentURL {
@@ -141,13 +149,29 @@ class WebTab: ObservableObject, Identifiable {
 
     // MARK: - Initialization
 
-    init(remotePort: RemotePort, sshConnection: SSHConnection) {
+    init(remotePort: RemotePort, connectionConfig: SavedConnection, sshConnection: SSHConnection? = nil) {
         self.id = UUID()
         self.remotePort = remotePort
+        self.connectionConfig = connectionConfig
         self.localPort = remotePort.port  // Will be updated after forwarding starts
         self.createdAt = Date()
         self.sshConnection = sshConnection
     }
+
+    /// Initialize from persisted state (for restoring after app restart)
+    init(id: UUID, remotePort: RemotePort, connectionConfig: SavedConnection, createdAt: Date, lastPath: String?, cachedPageTitle: String?) {
+        self.id = id
+        self.remotePort = remotePort
+        self.connectionConfig = connectionConfig
+        self.localPort = remotePort.port
+        self.createdAt = createdAt
+        self.pageTitle = cachedPageTitle
+        self.state = .closed  // Will reconnect on demand
+        self.lastPath = lastPath
+    }
+
+    /// Last visited path for restoration
+    var lastPath: String?
 
     // MARK: - Port Forwarding
 
@@ -198,6 +222,32 @@ class WebTab: ObservableObject, Identifiable {
 
         portForwarder = nil
         state = .closed
+    }
+
+    /// Reconnect and restart port forwarding (used when restoring persisted tabs)
+    /// - Parameter connection: The SSH connection to use for forwarding
+    func reconnect(with connection: SSHConnection) async throws {
+        Logger.clauntty.info("WebTab: reconnecting port \(self.remotePort.port)")
+        self.sshConnection = connection
+        try await startForwarding()
+
+        // Restore to last path if we have one
+        if let lastPath = lastPath, !lastPath.isEmpty, lastPath != "/" {
+            Logger.clauntty.info("WebTab: restoring last path: \(lastPath)")
+            // The webView will be set when the view appears and will load this path
+        }
+    }
+
+    /// Track the current path for persistence
+    func updateLastPath() {
+        if let url = currentURL {
+            var path = url.path
+            if let query = url.query {
+                path += "?\(query)"
+            }
+            if path.isEmpty { path = "/" }
+            lastPath = path
+        }
     }
 }
 

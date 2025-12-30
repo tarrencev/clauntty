@@ -231,14 +231,21 @@ struct WebViewContainer: UIViewRepresentable {
 
         init() {
             let port = RemotePort(id: 3000, port: 3000, process: "node", address: "127.0.0.1")
+            let config = SavedConnection(
+                name: "Test",
+                host: "localhost",
+                port: 22,
+                username: "test",
+                authMethod: .password
+            )
             let connection = SSHConnection(
                 host: "localhost",
                 port: 22,
                 username: "test",
                 authMethod: .password,
-                connectionId: UUID()
+                connectionId: config.id
             )
-            _webTab = StateObject(wrappedValue: WebTab(remotePort: port, sshConnection: connection))
+            _webTab = StateObject(wrappedValue: WebTab(remotePort: port, connectionConfig: config, sshConnection: connection))
         }
 
         var body: some View {

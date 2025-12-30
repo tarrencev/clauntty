@@ -22,12 +22,14 @@ class Session: ObservableObject, Identifiable {
         case connecting
         case connected
         case error(String)
+        case remotelyDeleted  // Session was killed externally (shell exit, another client killed it)
 
         static func == (lhs: State, rhs: State) -> Bool {
             switch (lhs, rhs) {
             case (.disconnected, .disconnected),
                  (.connecting, .connecting),
-                 (.connected, .connected):
+                 (.connected, .connected),
+                 (.remotelyDeleted, .remotelyDeleted):
                 return true
             case (.error(let a), .error(let b)):
                 return a == b
@@ -53,8 +55,12 @@ class Session: ObservableObject, Identifiable {
         case .connecting: return "connecting"
         case .connected: return "connected"
         case .error(let msg): return "error:\(msg)"
+        case .remotelyDeleted: return "remotelyDeleted"
         }
     }
+
+    /// Reason why the session was remotely deleted (for UI display)
+    var remoteClosureReason: String?
 
     /// Cached screenshot for tab selector (captured when switching away)
     var cachedScreenshot: UIImage?
@@ -263,6 +269,9 @@ class Session: ObservableObject, Identifiable {
     /// Called when a web tab should be opened via OSC 777
     var onOpenTabRequested: ((Int) -> Void)?
 
+    /// Called when session needs reconnection (detected nil channel on send attempt)
+    var onNeedsReconnect: (() -> Void)?
+
     // MARK: - rtach Protocol Session
 
     /// State machine for rtach protocol (raw/framed mode handling)
@@ -311,6 +320,13 @@ class Session: ObservableObject, Identifiable {
         self.parentConnection = connection
         self.state = .connected
         onStateChanged?(.connected)
+
+        // Reset scrollback tracking state for reconnects
+        // rtach will send scrollback when we reconnect to an existing session
+        scrollbackLoadedOffset = 0
+        scrollbackTotalSize = nil
+        scrollbackFullyLoaded = false
+        scrollbackPageRequestPending = false
 
         // Set up rtach protocol delegate and mark as connected
         rtachProtocol.expectsRtach = expectsRtach
@@ -566,6 +582,14 @@ class Session: ObservableObject, Identifiable {
         Logger.clauntty.verbose("Session \(self.id.uuidString.prefix(8)): sendData called with \(data.count) bytes, channelHandler=\(self.channelHandler != nil ? "set" : "nil")")
         if channelHandler == nil {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): sendData called but channelHandler is nil!")
+
+            // Connection dropped silently - update state if not already disconnected
+            if state != .disconnected {
+                Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): detected disconnection, triggering reconnect")
+                handleChannelInactive()
+                onNeedsReconnect?()
+            }
+            return
         }
         // Route through rtach protocol - handles raw vs framed mode
         rtachProtocol.sendKeyboardInput(data)
@@ -810,6 +834,10 @@ extension Session: RtachClient.RtachSessionDelegate {
     nonisolated func rtachSessionDidEnterFramedMode(_ session: RtachClient.RtachSession) {
         Task { @MainActor in
             Logger.clauntty.info("Session \(self.id.uuidString.prefix(8)): entered framed mode")
+
+            // Request scrollback after framed mode is established
+            // This gets scrollback history for reconnects (rtach preserves it on server)
+            self.requestScrollbackPage()
 
             // Check if we have a pending pause request
             if self.pendingPause {

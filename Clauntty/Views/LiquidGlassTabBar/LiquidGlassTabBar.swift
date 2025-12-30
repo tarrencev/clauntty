@@ -43,6 +43,9 @@ class LiquidGlassTabBar: UIView {
     /// Called when reconnect is requested (terminal)
     var onReconnect: ((TabItem) -> Void)?
 
+    /// Called when ports button is tapped (show port forwarding)
+    var onShowPorts: ((TabItem) -> Void)?
+
     /// Called when tabs button is tapped (show full selector)
     var onShowTabSelector: (() -> Void)?
 
@@ -82,6 +85,12 @@ class LiquidGlassTabBar: UIView {
 
     /// Flag to prevent layoutBubbles from interfering with collapse animation
     private var isCollapseAnimating: Bool = false
+
+    /// Flag to prevent layout during expanded tab transition
+    private var isExpandedTransitioning: Bool = false
+
+    /// Direction of expanded tab transition (true = next/left, false = previous/right)
+    private var transitionToNext: Bool = true
 
     // MARK: - Views
 
@@ -246,6 +255,116 @@ class LiquidGlassTabBar: UIView {
         onTabSelected?(nextTab)
     }
 
+    /// Switch to next tab while keeping expanded state (slide animation)
+    private func switchToNextTabExpanded() {
+        guard let activeId = activeTabId,
+              let currentIndex = allTabs.firstIndex(where: { $0.id == activeId }),
+              currentIndex < allTabs.count - 1,
+              let currentBubble = bubbleViews[activeId] else { return }
+
+        let nextTab = allTabs[currentIndex + 1]
+        triggerHaptic()
+
+        // Mark that we're transitioning
+        isExpandedTransitioning = true
+        transitionToNext = true
+
+        // Get or create the next bubble
+        let nextBubble = getOrCreateBubble(for: nextTab)
+
+        // Perform the slide transition
+        performExpandedSlideTransition(
+            from: currentBubble,
+            to: nextBubble,
+            newTab: nextTab,
+            slideLeft: true
+        )
+    }
+
+    /// Switch to previous tab while keeping expanded state (slide animation)
+    private func switchToPreviousTabExpanded() {
+        guard let activeId = activeTabId,
+              let currentIndex = allTabs.firstIndex(where: { $0.id == activeId }),
+              currentIndex > 0,
+              let currentBubble = bubbleViews[activeId] else { return }
+
+        let previousTab = allTabs[currentIndex - 1]
+        triggerHaptic()
+
+        // Mark that we're transitioning
+        isExpandedTransitioning = true
+        transitionToNext = false
+
+        // Get or create the previous bubble
+        let prevBubble = getOrCreateBubble(for: previousTab)
+
+        // Perform the slide transition
+        performExpandedSlideTransition(
+            from: currentBubble,
+            to: prevBubble,
+            newTab: previousTab,
+            slideLeft: false
+        )
+    }
+
+    /// Perform slide animation between two expanded tabs
+    private func performExpandedSlideTransition(from oldBubble: TabBubble, to newBubble: TabBubble, newTab: TabItem, slideLeft: Bool) {
+        let expandedHeight: CGFloat = 108
+        let fullWidth = bounds.width - horizontalPadding * 2
+        let topY = topPadding
+
+        // Current (old) bubble's frame
+        let centerFrame = CGRect(x: horizontalPadding, y: topY, width: fullWidth, height: expandedHeight)
+
+        // Position where old bubble will slide to (off screen)
+        let offscreenOffset = bounds.width + 20
+        let oldTargetX = slideLeft ? (horizontalPadding - offscreenOffset) : (horizontalPadding + offscreenOffset)
+
+        // Position where new bubble starts (off screen, opposite side)
+        let newStartX = slideLeft ? (horizontalPadding + offscreenOffset) : (horizontalPadding - offscreenOffset)
+
+        // Move new bubble to self (like the old one) and position it off-screen
+        if newBubble.superview != self {
+            newBubble.removeFromSuperview()
+            addSubview(newBubble)
+        }
+
+        // Set up new bubble in expanded state at starting position (off-screen)
+        newBubble.frame = CGRect(x: newStartX, y: topY, width: fullWidth, height: expandedHeight)
+        newBubble.isActiveTab = true
+        newBubble.setExpandedSilently(true)  // Set expanded without triggering pop animation
+        newBubble.setGlassCornerRadius(26)
+        newBubble.alpha = 1
+
+        // Show expanded content on new bubble immediately (no pop animation)
+        newBubble.showExpandedContentInstant()
+
+        // Animate both bubbles
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseInOut]) {
+            // Slide old bubble out
+            oldBubble.frame.origin.x = oldTargetX
+
+            // Slide new bubble in
+            newBubble.frame = centerFrame
+        } completion: { _ in
+            // Hide old bubble content and reset its state (silently, no animation)
+            oldBubble.setExpandedSilently(false)
+            oldBubble.alpha = 0
+
+            // Move old bubble back to container
+            oldBubble.removeFromSuperview()
+            self.bubblesContainer.addSubview(oldBubble)
+
+            // Update state
+            self.expandedTabId = newTab.id
+            self.activeTabId = newTab.id
+            self.isExpandedTransitioning = false
+
+            // Notify that tab changed
+            self.onTabSelected?(newTab)
+        }
+    }
+
     private func triggerHaptic() {
         let generator = UIImpactFeedbackGenerator(style: .medium)
         generator.impactOccurred()
@@ -267,6 +386,11 @@ class LiquidGlassTabBar: UIView {
         // Skip layout during collapse animation to prevent interference
         guard !isCollapseAnimating else {
             Logger.clauntty.info("layoutBubbles SKIPPED: isCollapseAnimating=true")
+            return
+        }
+        // Skip layout during expanded-to-expanded transition (slide animation handles it)
+        guard !isExpandedTransitioning else {
+            Logger.clauntty.info("layoutBubbles SKIPPED: isExpandedTransitioning=true")
             return
         }
         guard !allTabs.isEmpty else { return }
@@ -324,10 +448,19 @@ class LiquidGlassTabBar: UIView {
             let frame = CGRect(x: currentX, y: y, width: bubbleWidth, height: bubbleHeight)
             currentX += bubbleWidth + spacing
 
-            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
+            // Check if this is a newly created bubble - set frame instantly, no animation
+            if newlyCreatedBubbleIds.contains(tab.id) {
+                newlyCreatedBubbleIds.remove(tab.id)
                 bubble.frame = frame
                 bubble.alpha = 1
                 bubble.transform = .identity
+            } else {
+                // Existing bubble - animate position change
+                UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
+                    bubble.frame = frame
+                    bubble.alpha = 1
+                    bubble.transform = .identity
+                }
             }
 
             bubble.isActiveTab = isActive
@@ -348,6 +481,31 @@ class LiquidGlassTabBar: UIView {
     private func layoutExpandedBubble(activeTab: TabItem, containerWidth: CGFloat) {
         let bubble = getOrCreateBubble(for: activeTab)
         let expandedHeight: CGFloat = 108  // Two rows: 8 + 44 + 4 + 44 + 8
+        let fullWidth = bounds.width - horizontalPadding * 2
+        let targetCenterY = topPadding + expandedHeight / 2
+        let targetFrame = CGRect(
+            x: horizontalPadding,
+            y: topPadding,
+            width: fullWidth,
+            height: expandedHeight
+        )
+
+        // If bubble is already expanded and in self (from slide transition), skip animation
+        if bubble.isExpanded && bubble.superview == self {
+            // Just ensure frame is correct without animation
+            UIView.performWithoutAnimation {
+                bubble.frame = targetFrame
+                bubble.setGlassCornerRadius(26)
+                // Hide other bubbles and plus button
+                for (id, otherBubble) in bubbleViews {
+                    if id != activeTab.id {
+                        otherBubble.alpha = 0
+                    }
+                }
+                plusButton.alpha = 0
+            }
+            return
+        }
 
         // Move bubble to self (the bar) so it can extend full width
         if bubble.superview != self {
@@ -358,23 +516,8 @@ class LiquidGlassTabBar: UIView {
             bubble.frame = frameInSelf
         }
 
-        // Get current center and frame - this is the point we expand FROM
-        let currentCenter = bubble.center
+        // Get current frame - this is the point we expand FROM
         let startFrame = bubble.frame
-
-        // Full width of the bar
-        let fullWidth = bounds.width - horizontalPadding * 2
-
-        // Calculate target frame that keeps the CENTER fixed horizontally
-        // and only moves vertically to accommodate new height
-        let targetCenterY = topPadding + expandedHeight / 2
-        let targetFrame = CGRect(
-            x: currentCenter.x - fullWidth / 2,
-            y: targetCenterY - expandedHeight / 2,
-            width: fullWidth,
-            height: expandedHeight
-        )
-
 
         // Set expanded state
         bubble.isActiveTab = true
@@ -399,7 +542,7 @@ class LiquidGlassTabBar: UIView {
         let endCornerRadius: CGFloat = 26
 
         // Use scale transform animation - this ALWAYS expands from center
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut]) {
+        UIView.animate(withDuration: 0.15, delay: 0, options: [.curveEaseOut]) {
             bubble.transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
             // Also move center vertically
             bubble.center.y = targetCenterY
@@ -412,7 +555,7 @@ class LiquidGlassTabBar: UIView {
             let cornerAnimation = CABasicAnimation(keyPath: "cornerRadius")
             cornerAnimation.fromValue = startCornerRadius
             cornerAnimation.toValue = endCornerRadius
-            cornerAnimation.duration = 0.15
+            cornerAnimation.duration = 0.1
             cornerAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
             bubble.setGlassCornerRadius(endCornerRadius)
             bubble.glassLayer.add(cornerAnimation, forKey: "cornerRadius")
@@ -467,6 +610,9 @@ class LiquidGlassTabBar: UIView {
         return Array(allTabs[startIndex...endIndex])
     }
 
+    /// Track which bubbles are newly created (need instant positioning, no animation)
+    private var newlyCreatedBubbleIds: Set<UUID> = []
+
     private func getOrCreateBubble(for tab: TabItem) -> TabBubble {
         if let existing = bubbleViews[tab.id] {
             // Update existing bubble
@@ -479,7 +625,8 @@ class LiquidGlassTabBar: UIView {
             return existing
         }
 
-        // Create new bubble
+        // Create new bubble - mark as new so layoutBubbles skips animation
+        newlyCreatedBubbleIds.insert(tab.id)
         let bubble = TabBubble()
         switch tab {
         case .terminal(let session):
@@ -493,6 +640,37 @@ class LiquidGlassTabBar: UIView {
             self?.handleBubbleTap(tab)
         }
 
+        // Long press handler - expands active tab immediately
+        bubble.onLongPress = { [weak self] in
+            guard let self = self else { return }
+            // Only expand if this is the active tab
+            if tab.id == self.activeTabId && !self.isExpanded {
+                self.triggerHaptic()
+                self.isExpanded = true
+                self.expandedTabId = self.activeTabId
+                self.setNeedsLayout()
+                self.layoutIfNeeded()
+            }
+        }
+
+        // Swipe handlers for expanded state - switch tabs while keeping expanded
+        bubble.onSwipeLeft = { [weak self] in
+            self?.switchToNextTabExpanded()
+        }
+
+        bubble.onSwipeRight = { [weak self] in
+            self?.switchToPreviousTabExpanded()
+        }
+
+        // Swipe handlers for collapsed state - switch tabs normally
+        bubble.onSwipeLeftCollapsed = { [weak self] in
+            self?.switchToNextTab()
+        }
+
+        bubble.onSwipeRightCollapsed = { [weak self] in
+            self?.switchToPreviousTab()
+        }
+
         // Expanded state action handlers
         bubble.onDisconnect = { [weak self] in
             self?.collapseExpanded()
@@ -502,6 +680,12 @@ class LiquidGlassTabBar: UIView {
         bubble.onReconnect = { [weak self] in
             self?.collapseExpanded()
             self?.onReconnect?(tab)
+        }
+
+        bubble.onPorts = { [weak self] in
+            Logger.clauntty.info("LiquidGlassTabBar: onPorts callback fired, onShowPorts exists=\(self?.onShowPorts != nil)")
+            self?.collapseExpanded()
+            self?.onShowPorts?(tab)
         }
 
         bubble.onTabs = { [weak self] in
@@ -615,7 +799,7 @@ class LiquidGlassTabBar: UIView {
         let endCornerRadius = min(collapsedHeight / 2, 20)
 
         // Animate scale down AND move center up to where collapsed tab should be
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .overrideInheritedDuration, .overrideInheritedOptions]) {
+        UIView.animate(withDuration: 0.15, delay: 0, options: [.curveEaseOut, .overrideInheritedDuration, .overrideInheritedOptions]) {
             Logger.clauntty.info("COLLAPSE ANIMATING: applying scale transform + moving center up")
             bubble.transform = CGAffineTransform(scaleX: scaleX, y: scaleY)
             bubble.center.y = targetCenterY  // Move up while shrinking
@@ -653,7 +837,7 @@ class LiquidGlassTabBar: UIView {
             let cornerAnimation = CABasicAnimation(keyPath: "cornerRadius")
             cornerAnimation.fromValue = startCornerRadius
             cornerAnimation.toValue = endCornerRadius
-            cornerAnimation.duration = 0.15
+            cornerAnimation.duration = 0.1
             cornerAnimation.timingFunction = CAMediaTimingFunction(name: .easeOut)
             bubble.setGlassCornerRadius(endCornerRadius)
             bubble.glassLayer.add(cornerAnimation, forKey: "cornerRadius")

@@ -12,13 +12,8 @@ struct ConnectionListView: View {
     @State private var pendingConnection: SavedConnection?
     @State private var enteredPassword = ""
 
-    // Session picker state
+    // Connection state
     @State private var isConnecting = false
-    @State private var showingSessionPicker = false
-    @State private var rtachSessions: [RtachSession] = []
-    @State private var detectedPorts: [RemotePort] = []
-    @State private var connectionForPicker: SavedConnection?
-    @State private var deployerForPicker: RtachDeployer?
     @State private var connectionError: String?
     @State private var showingError = false
     @State private var showingSettings = false
@@ -92,42 +87,6 @@ struct ConnectionListView: View {
         } message: {
             if let connection = pendingConnection {
                 Text("Enter password for \(connection.username)@\(connection.host)")
-            }
-        }
-        .sheet(isPresented: $showingSessionPicker) {
-            if let connection = connectionForPicker {
-                SessionPickerView(
-                    connection: connection,
-                    sessions: $rtachSessions,
-                    ports: $detectedPorts,
-                    deployer: deployerForPicker,
-                    onSelect: { selectedSessionId in
-                        finalizeConnection(to: connection, rtachSessionId: selectedSessionId)
-                    },
-                    onSelectPort: { port in
-                        openWebTab(for: port, connection: connection)
-                    },
-                    onSwitchToTab: { existingSession in
-                        sessionManager.switchTo(existingSession)
-                        // Dismiss this view too (not just the picker) to return to terminal
-                        dismiss()
-                    },
-                    onSwitchToWebTab: { webTab in
-                        sessionManager.switchTo(webTab)
-                        dismiss()
-                    },
-                    onRefreshPorts: { [deployerForPicker] in
-                        guard let deployer = deployerForPicker else { return [] }
-                        let scanner = PortScanner(connection: deployer.connection)
-                        return (try? await scanner.listListeningPorts()) ?? []
-                    },
-                    onForwardOnly: { port in
-                        try? await sessionManager.startForwarding(port: port, config: connection)
-                    },
-                    onStopForwarding: { port in
-                        sessionManager.stopForwarding(port: port, config: connection)
-                    }
-                )
             }
         }
         .alert("Connection Error", isPresented: $showingError) {
@@ -211,77 +170,29 @@ struct ConnectionListView: View {
 
         Task {
             do {
-                // Connect SSH and list existing rtach sessions
-                let result = try await sessionManager.connectAndListSessions(for: connection)
-
-                // Also scan for listening ports
-                var ports: [RemotePort] = []
-                do {
-                    ports = try await sessionManager.scanPorts(for: connection)
-                    Logger.clauntty.info("ConnectionListView: found \(ports.count) listening ports")
-                } catch {
-                    Logger.clauntty.warning("ConnectionListView: port scan failed: \(error.localizedDescription)")
+                // Connect SSH and sync sessions with server (auto-creates tabs for existing sessions)
+                if let result = try await sessionManager.connectAndListSessions(for: connection) {
+                    // Sync existing sessions -> marks deleted ones, creates tabs for new ones
+                    await sessionManager.syncSessionsWithServer(config: connection, deployer: result.deployer)
                 }
 
                 await MainActor.run {
                     isConnecting = false
-                    detectedPorts = ports
 
-                    if let result = result {
-                        Logger.clauntty.info("ConnectionListView: got \(result.sessions.count) sessions from connectAndListSessions")
-                        if !result.sessions.isEmpty || !ports.isEmpty {
-                            // Show session picker (has sessions or ports)
-                            rtachSessions = result.sessions
-                            deployerForPicker = result.deployer
-                            connectionForPicker = connection
-                            showingSessionPicker = true
-                        } else {
-                            Logger.clauntty.info("ConnectionListView: no existing sessions or ports, creating new")
-                            finalizeConnection(to: connection, rtachSessionId: nil)
-                        }
-                    } else if !ports.isEmpty {
-                        // No rtach sessions but have ports - still show picker
-                        rtachSessions = []
-                        deployerForPicker = nil
-                        connectionForPicker = connection
-                        showingSessionPicker = true
-                    } else {
-                        Logger.clauntty.info("ConnectionListView: connectAndListSessions returned nil, creating new session")
-                        // No existing sessions, create new one directly
-                        finalizeConnection(to: connection, rtachSessionId: nil)
-                    }
+                    // Create a new session and tab
+                    let session = sessionManager.createSession(for: connection)
+                    Logger.clauntty.info("ConnectionListView: created new session \(session.id.uuidString.prefix(8))")
+
+                    // Save persistence immediately
+                    sessionManager.savePersistence()
+
+                    // Navigation happens automatically when sessionManager.hasSessions becomes true
+                    // TerminalView will call sessionManager.connect() via connectSession()
                 }
             } catch {
                 await MainActor.run {
                     isConnecting = false
                     connectionError = error.localizedDescription
-                    showingError = true
-                }
-            }
-        }
-    }
-
-    private func finalizeConnection(to connection: SavedConnection, rtachSessionId: String?) {
-        // Create a new session object with rtach session ID
-        let session = sessionManager.createSession(for: connection)
-        session.rtachSessionId = rtachSessionId
-
-        // Navigation happens automatically when sessionManager.hasSessions becomes true
-        // TerminalView will call sessionManager.connect() via connectSession()
-    }
-
-    private func openWebTab(for port: RemotePort, connection: SavedConnection) {
-        Task {
-            do {
-                let webTab = try await sessionManager.createWebTab(for: port, config: connection)
-                Logger.clauntty.info("ConnectionListView: created web tab for port \(port.port)")
-                await MainActor.run {
-                    sessionManager.switchTo(webTab)
-                }
-            } catch {
-                Logger.clauntty.error("ConnectionListView: failed to create web tab: \(error.localizedDescription)")
-                await MainActor.run {
-                    connectionError = "Failed to forward port \(port.port): \(error.localizedDescription)"
                     showingError = true
                 }
             }

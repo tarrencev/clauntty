@@ -54,16 +54,17 @@ enum LaunchArgs {
         return nil
     }
 
-    /// Tab specification for multi-tab launch
-    /// Format: "0,1,:3005" = session index 0, session index 1, port forward 3005
+    /// Tab specification for launch
+    /// With persistence, numbers refer to persisted tab indices for the server
     enum TabSpec: Equatable {
-        case session(Int)      // Existing rtach session by index (0-based)
+        case existing(Int)     // Select existing persisted tab by index (0-based, for this server)
         case newSession        // Create new session (use "new" or "n")
         case port(Int)         // Port forward (prefix with :)
     }
 
     /// Get tab specs from --tabs argument
-    /// Example: --tabs "0,1,:3005,new"
+    /// Example: --tabs "0,1,new" or --tabs "0,:3000"
+    /// Numbers select existing persisted tabs for the specified server
     static func tabSpecs() -> [TabSpec]? {
         let args = CommandLine.arguments
         guard let idx = args.firstIndex(of: "--tabs"), idx + 1 < args.count else {
@@ -84,7 +85,7 @@ enum LaunchArgs {
             } else if trimmed == "new" || trimmed == "n" {
                 specs.append(.newSession)
             } else if let index = Int(trimmed) {
-                specs.append(.session(index))
+                specs.append(.existing(index))
             }
         }
 
@@ -173,10 +174,22 @@ extension Notification.Name {
 /// Wrapper view that handles scenePhase changes and notification taps
 struct AppContentView: View {
     @Environment(\.scenePhase) var scenePhase
+    @EnvironmentObject var connectionStore: ConnectionStore
     @ObservedObject var sessionManager: SessionManager
+
+    /// Track if we've loaded persisted tabs (only do once)
+    @State private var hasLoadedPersistedTabs = false
 
     var body: some View {
         ContentView()
+            .onAppear {
+                // Load persisted tabs on first appear
+                if !hasLoadedPersistedTabs {
+                    hasLoadedPersistedTabs = true
+                    sessionManager.loadPersistedTabs(connectionStore: connectionStore)
+                    sessionManager.loadPersistedWebTabs(connectionStore: connectionStore)
+                }
+            }
             .onChange(of: scenePhase) { _, newPhase in
                 handleScenePhaseChange(newPhase)
             }
@@ -205,17 +218,19 @@ struct AppContentView: View {
             // Process any pending session switch from notification tap
             NotificationManager.shared.processPendingSessionSwitch()
 
-            // Check for ANY disconnected sessions and reconnect them
-            let disconnectedSessions = sessionManager.sessions.filter { $0.state == .disconnected }
-            if !disconnectedSessions.isEmpty {
-                Logger.clauntty.info("App activated: found \(disconnectedSessions.count) disconnected sessions, attempting reconnect")
-                Task {
-                    await sessionManager.reconnectDisconnectedSessions()
+            // Only reconnect/resume the ACTIVE session (lazy reconnect for others)
+            if let activeSession = sessionManager.activeSession {
+                if activeSession.state == .disconnected {
+                    // Active session is disconnected - reconnect it
+                    Logger.clauntty.info("App activated: reconnecting active session \(activeSession.id.uuidString.prefix(8))")
+                    Task {
+                        try? await sessionManager.reconnect(session: activeSession)
+                    }
+                } else {
+                    // Active session is connected - just resume output
+                    activeSession.resumeOutput()
+                    Logger.clauntty.info("App activated: resumed active session \(activeSession.id.uuidString.prefix(8))")
                 }
-            } else if let activeSession = sessionManager.activeSession {
-                // No disconnected sessions - just resume the active one
-                activeSession.resumeOutput()
-                Logger.clauntty.info("App activated: resumed active session \(activeSession.id.uuidString.prefix(8))")
             }
         case .inactive:
             // Transitional state, don't change background flag

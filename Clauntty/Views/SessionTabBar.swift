@@ -274,6 +274,8 @@ struct SessionTab: View {
             return .gray
         case .error:
             return .red
+        case .remotelyDeleted:
+            return .orange
         }
     }
 

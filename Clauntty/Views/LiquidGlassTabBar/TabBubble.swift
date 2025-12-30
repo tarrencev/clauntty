@@ -48,20 +48,42 @@ class TabBubble: UIView {
     var isActiveTab: Bool = false {
         didSet { updateActiveState() }
     }
+    /// Skip animation on next isExpanded change (for slide transitions)
+    private var skipExpandAnimation: Bool = false
+
     var isExpanded: Bool = false {
         didSet {
-            if oldValue != isExpanded {
+            if oldValue != isExpanded && !skipExpandAnimation {
                 animateExpansion()
             }
+            skipExpandAnimation = false
         }
+    }
+
+    /// Set expanded state without triggering animation
+    func setExpandedSilently(_ expanded: Bool) {
+        skipExpandAnimation = true
+        isExpanded = expanded
     }
 
     /// Callback when this bubble is tapped (collapsed state)
     var onTap: (() -> Void)?
 
+    /// Callback when bubble is long pressed (to expand active tab without release)
+    var onLongPress: (() -> Void)?
+
+    /// Callbacks for swipe gestures (expanded state)
+    var onSwipeLeft: (() -> Void)?
+    var onSwipeRight: (() -> Void)?
+
+    /// Callbacks for swipe gestures (collapsed state)
+    var onSwipeLeftCollapsed: (() -> Void)?
+    var onSwipeRightCollapsed: (() -> Void)?
+
     /// Callbacks for expanded state actions
     var onDisconnect: (() -> Void)?
     var onReconnect: (() -> Void)?
+    var onPorts: (() -> Void)?  // Show port forwarding UI
     var onTabs: (() -> Void)?
     var onNewTab: (() -> Void)?
     var onDismiss: (() -> Void)?
@@ -348,6 +370,45 @@ class TabBubble: UIView {
     private func setupGestures() {
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
         addGestureRecognizer(tap)
+
+        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress))
+        longPress.minimumPressDuration = 0.3  // Quick long press
+        addGestureRecognizer(longPress)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+        addGestureRecognizer(pan)
+    }
+
+    @objc private func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began else { return }
+        // Only trigger long press in collapsed state for active tabs
+        if !isExpanded {
+            onLongPress?()
+        }
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+
+        let translation = gesture.translation(in: self)
+        let velocity = gesture.velocity(in: self)
+        let threshold: CGFloat = 50
+
+        if isExpanded {
+            // Expanded state - use expanded callbacks
+            if translation.x > threshold || velocity.x > 500 {
+                onSwipeRight?()
+            } else if translation.x < -threshold || velocity.x < -500 {
+                onSwipeLeft?()
+            }
+        } else {
+            // Collapsed state - use collapsed callbacks
+            if translation.x > threshold || velocity.x > 500 {
+                onSwipeRightCollapsed?()
+            } else if translation.x < -threshold || velocity.x < -500 {
+                onSwipeLeftCollapsed?()
+            }
+        }
     }
 
     // MARK: - Actions
@@ -369,20 +430,17 @@ class TabBubble: UIView {
 
     @objc private func handleLeftAction() {
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-        switch tabType {
-        case .terminal:
-            onDisconnect?()
-        case .web:
-            // Reader mode or similar
-            break
-        }
+        // Close button for both terminal and web tabs
+        onDisconnect?()
     }
 
     @objc private func handleRightAction() {
+        logger.info("TabBubble: handleRightAction called, tabType=\(String(describing: self.tabType))")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         switch tabType {
         case .terminal:
-            onReconnect?()
+            logger.info("TabBubble: calling onPorts callback (exists=\(self.onPorts != nil))")
+            onPorts?()  // Show port forwarding UI
         case .web:
             onReload?()
         }
@@ -676,15 +734,20 @@ class TabBubble: UIView {
             // Terminate button - smaller icon
             let terminateConfig = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
             leftActionButton.setImage(UIImage(systemName: "xmark.circle", withConfiguration: terminateConfig), for: .normal)
-            leftActionButton.tintColor = .systemRed
-            // No reload button for terminal
-            rightActionButton.alpha = 0
-            rightActionButton.isHidden = true
+            leftActionButton.tintColor = .white
+            // Ports button for terminal (globe icon)
+            let portsConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+            rightActionButton.setImage(UIImage(systemName: "globe", withConfiguration: portsConfig), for: .normal)
+            rightActionButton.tintColor = .white
+            rightActionButton.isHidden = false
         } else {
-            let webConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
-            leftActionButton.setImage(UIImage(systemName: "doc.text", withConfiguration: webConfig), for: .normal)
-            leftActionButton.tintColor = .label
-            rightActionButton.setImage(UIImage(systemName: "arrow.clockwise", withConfiguration: webConfig), for: .normal)
+            // Web tab: close button (X) on left, reload on right
+            let webConfig = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            leftActionButton.setImage(UIImage(systemName: "xmark.circle", withConfiguration: webConfig), for: .normal)
+            leftActionButton.tintColor = .white
+            let reloadConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+            rightActionButton.setImage(UIImage(systemName: "arrow.clockwise", withConfiguration: reloadConfig), for: .normal)
+            rightActionButton.tintColor = .white
             rightActionButton.isHidden = false
         }
 
@@ -703,9 +766,9 @@ class TabBubble: UIView {
         isExpanded = true
         layoutContent()
 
-        // Get views to animate (no rightActionButton for terminal - no reload button)
+        // Get views to animate (rightActionButton is ports for terminal, reload for web)
         let expandedViews: [UIView] = isTerminal
-            ? [topRowBackground, leftActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
+            ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
             : [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, backButton, forwardButton, shareButton, portPrefixLabel, urlTextField, globeImageView]
 
         // Set initial state
@@ -720,6 +783,63 @@ class TabBubble: UIView {
                 view.transform = .identity
                 view.alpha = 1
             }
+        }
+    }
+
+    /// Show expanded content immediately without animation (for slide transitions)
+    func showExpandedContentInstant() {
+        let isTerminal: Bool
+        switch tabType {
+        case .terminal: isTerminal = true
+        case .web: isTerminal = false
+        }
+
+        // Update button icons
+        if isTerminal {
+            let terminateConfig = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            leftActionButton.setImage(UIImage(systemName: "xmark.circle", withConfiguration: terminateConfig), for: .normal)
+            leftActionButton.tintColor = .white
+            let portsConfig = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
+            rightActionButton.setImage(UIImage(systemName: "globe", withConfiguration: portsConfig), for: .normal)
+            rightActionButton.tintColor = .white
+            rightActionButton.isHidden = false
+        } else {
+            let webConfig = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            leftActionButton.setImage(UIImage(systemName: "xmark.circle", withConfiguration: webConfig), for: .normal)
+            leftActionButton.tintColor = .white
+            let reloadConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+            rightActionButton.setImage(UIImage(systemName: "arrow.clockwise", withConfiguration: reloadConfig), for: .normal)
+            rightActionButton.tintColor = .white
+            rightActionButton.isHidden = false
+        }
+
+        let bottomRowConfig = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
+        tabsButton.setImage(UIImage(systemName: "square.on.square", withConfiguration: bottomRowConfig), for: .normal)
+        newTabButton.setImage(UIImage(systemName: "plus", withConfiguration: bottomRowConfig), for: .normal)
+
+        // Update title
+        updateTitleLabel()
+        if !isTerminal {
+            urlTextField.text = webPath
+        }
+
+        // Layout for expanded state (without animation)
+        UIView.performWithoutAnimation {
+            isExpanded = true
+            layoutContent()
+
+            // Show all expanded views immediately
+            let expandedViews: [UIView] = isTerminal
+                ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
+                : [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, backButton, forwardButton, shareButton, portPrefixLabel, urlTextField, globeImageView]
+
+            for view in expandedViews {
+                view.transform = .identity
+                view.alpha = 1
+            }
+
+            // Force layout to apply immediately
+            self.layoutIfNeeded()
         }
     }
 
@@ -767,13 +887,17 @@ class TabBubble: UIView {
         if isTerminal {
             let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
             leftActionButton.setImage(UIImage(systemName: "xmark.circle", withConfiguration: config), for: .normal)
-            leftActionButton.tintColor = .systemRed
-            rightActionButton.setImage(UIImage(systemName: "arrow.clockwise", withConfiguration: config), for: .normal)
+            leftActionButton.tintColor = .white
+            rightActionButton.setImage(UIImage(systemName: "globe", withConfiguration: config), for: .normal)
+            rightActionButton.tintColor = .white
         } else {
-            let config = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
-            leftActionButton.setImage(UIImage(systemName: "doc.text", withConfiguration: config), for: .normal)
-            leftActionButton.tintColor = .label
-            rightActionButton.setImage(UIImage(systemName: "arrow.clockwise", withConfiguration: config), for: .normal)
+            // Web tab: close button (X) on left, reload on right
+            let config = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+            leftActionButton.setImage(UIImage(systemName: "xmark.circle", withConfiguration: config), for: .normal)
+            leftActionButton.tintColor = .white
+            let reloadConfig = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+            rightActionButton.setImage(UIImage(systemName: "arrow.clockwise", withConfiguration: reloadConfig), for: .normal)
+            rightActionButton.tintColor = .white
         }
 
         // Update title for expanded state (URL for web tabs)
@@ -789,10 +913,10 @@ class TabBubble: UIView {
 
         if isExpanded {
             // Pop-in animation: start scaled down and invisible, then pop to full size
-            // For terminal: show title in top row, connection label below (no reload button)
+            // For terminal: show title in top row, connection label below, ports button
             // For web: show globe + URL components
             let expandedViews: [UIView] = isTerminal
-                ? [topRowBackground, leftActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
+                ? [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, connectionLabel, statusView, titleLabel]
                 : [topRowBackground, leftActionButton, rightActionButton, tabsButton, newTabButton, backButton, forwardButton, shareButton, portPrefixLabel, urlTextField, globeImageView]
 
             // Set initial state: scaled down and invisible
@@ -893,6 +1017,8 @@ class TabBubble: UIView {
                 statusView.backgroundColor = .systemGray
             case .error:
                 statusView.backgroundColor = .systemRed
+            case .remotelyDeleted:
+                statusView.backgroundColor = .systemOrange
             }
         case .web:
             break

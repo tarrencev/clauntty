@@ -1,4 +1,5 @@
 import SwiftUI
+import os.log
 
 /// SwiftUI wrapper for the UIKit LiquidGlassTabBar
 struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
@@ -9,6 +10,9 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
 
     /// Called when user wants to see full tab selector
     var onShowTabSelector: () -> Void
+
+    /// Called when user wants to see ports for a session
+    var onShowPorts: ((Session) -> Void)?
 
     /// Hash of session states to trigger updates when states change
     /// This forces SwiftUI to call updateUIView when any session state changes
@@ -47,6 +51,14 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
                 }
             case .web:
                 break
+            }
+        }
+
+        bar.onShowPorts = { tab in
+            Logger.clauntty.info("LiquidGlassTabBarRepresentable: onShowPorts callback fired, coordinator.onShowPorts exists=\(context.coordinator.onShowPorts != nil)")
+            if case .terminal(let session) = tab {
+                Logger.clauntty.info("LiquidGlassTabBarRepresentable: calling coordinator.onShowPorts for session \(session.id.uuidString.prefix(8))")
+                context.coordinator.onShowPorts?(session)
             }
         }
 
@@ -103,11 +115,16 @@ struct LiquidGlassTabBarRepresentable: UIViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        Coordinator(onShowPorts: onShowPorts)
     }
 
     class Coordinator {
         weak var sessionManager: SessionManager?
+        var onShowPorts: ((Session) -> Void)?
+
+        init(onShowPorts: ((Session) -> Void)? = nil) {
+            self.onShowPorts = onShowPorts
+        }
     }
 }
 

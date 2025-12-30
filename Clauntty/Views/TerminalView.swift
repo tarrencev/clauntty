@@ -150,6 +150,32 @@ struct TerminalView: View {
                         .padding(.top)
                     }
                 }
+
+                // Show remotely deleted overlay (session ended on server)
+                if case .remotelyDeleted = session.state {
+                    Color.black.opacity(0.9)
+                        .ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                            .font(.system(size: 48))
+                        Text("Session Ended")
+                            .foregroundColor(.white)
+                            .font(.headline)
+                        if let reason = session.remoteClosureReason {
+                            Text(reason)
+                                .foregroundColor(.gray)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal)
+                        }
+                        Button("Close Tab") {
+                            sessionManager.closeSession(session, killRemote: false)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.orange)
+                        .padding(.top)
+                    }
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .captureTerminalText)) { _ in

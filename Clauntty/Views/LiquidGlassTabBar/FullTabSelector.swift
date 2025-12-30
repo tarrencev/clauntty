@@ -43,26 +43,49 @@ struct FullTabSelector: View {
 
                 // Tab grid
                 ScrollView {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(allTabs, id: \.id) { tab in
-                            TabCard(
-                                tab: tab,
-                                isActive: isActive(tab),
-                                onSelect: {
-                                    selectTab(tab)
-                                },
-                                onClose: {
-                                    closeTab(tab)
-                                }
-                            )
+                    VStack(spacing: 24) {
+                        // Tabs grid
+                        LazyVGrid(columns: columns, spacing: 16) {
+                            ForEach(allTabs, id: \.id) { tab in
+                                TabCard(
+                                    tab: tab,
+                                    isActive: isActive(tab),
+                                    onSelect: {
+                                        selectTab(tab)
+                                    },
+                                    onClose: {
+                                        closeTab(tab)
+                                    }
+                                )
+                            }
+
+                            // New tab button
+                            NewTabCard(onTap: {
+                                onDismiss()
+                                // Trigger new tab sheet after dismissing
+                                onNewTab?()
+                            })
                         }
 
-                        // New tab button
-                        NewTabCard(onTap: {
-                            onDismiss()
-                            // Trigger new tab sheet after dismissing
-                            onNewTab?()
-                        })
+                        // Forwarded ports section
+                        if !sessionManager.forwardedPorts.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Forwarded Ports")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                    .foregroundColor(.gray)
+
+                                ForEach(sessionManager.forwardedPorts) { port in
+                                    ForwardedPortRow(port: port) {
+                                        sessionManager.stopForwarding(
+                                            port: port.remotePort,
+                                            config: port.connectionConfig
+                                        )
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.bottom, 32)
@@ -157,19 +180,76 @@ struct TabCard: View {
                     }
                 }
 
-                // Close button overlay
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: onClose) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 22))
+                // Remote closure overlay
+                if isRemotelyDeleted {
+                    ZStack {
+                        Color.black.opacity(0.85)
+
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                                .font(.title2)
+                            Text("Session Ended")
+                                .font(.caption)
+                                .fontWeight(.medium)
                                 .foregroundColor(.white)
-                                .shadow(radius: 2)
+                            if let reason = remoteClosureReason {
+                                Text(reason)
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                            }
+
+                            Button(action: onClose) {
+                                Text("Close Tab")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.orange)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(6)
+                            }
+                            .padding(.top, 4)
                         }
-                        .padding(8)
+                        .padding()
                     }
-                    Spacer()
+                }
+
+                // Close button overlay (only show if not remotely deleted)
+                if !isRemotelyDeleted {
+                    VStack {
+                        HStack {
+                            Spacer()
+                            Button(action: onClose) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(.white)
+                                    .shadow(radius: 2)
+                            }
+                            .padding(8)
+                        }
+                        Spacer()
+                    }
+                }
+
+                // Server badge (top-left corner)
+                if let server = serverName {
+                    VStack {
+                        HStack {
+                            Text(server)
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.black.opacity(0.6))
+                                .cornerRadius(4)
+                                .padding(8)
+                            Spacer()
+                        }
+                        Spacer()
+                    }
                 }
 
                 // Active indicator
@@ -231,7 +311,37 @@ struct TabCard: View {
         case .connecting: return .orange
         case .disconnected: return .gray
         case .error: return .red
+        case .remotelyDeleted: return .orange
         }
+    }
+
+    /// Server name for display
+    private var serverName: String? {
+        switch tab {
+        case .terminal(let session):
+            if !session.connectionConfig.name.isEmpty {
+                return session.connectionConfig.name
+            }
+            return session.connectionConfig.host
+        case .web(let webTab):
+            return webTab.serverDisplayName
+        }
+    }
+
+    /// Whether this tab has been remotely deleted
+    private var isRemotelyDeleted: Bool {
+        if case .terminal(let session) = tab, case .remotelyDeleted = session.state {
+            return true
+        }
+        return false
+    }
+
+    /// Remote closure reason
+    private var remoteClosureReason: String? {
+        if case .terminal(let session) = tab {
+            return session.remoteClosureReason
+        }
+        return nil
     }
 }
 
@@ -263,6 +373,41 @@ struct NewTabCard: View {
                 .font(.caption)
                 .foregroundColor(.gray)
         }
+    }
+}
+
+// MARK: - Forwarded Port Row
+
+/// Row showing a forwarded port in the ports section
+struct ForwardedPortRow: View {
+    @ObservedObject var port: ForwardedPort
+    let onStop: () -> Void
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(":\(port.remotePort.port)")
+                    .font(.system(.body, design: .monospaced))
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+
+                Text("localhost:\(port.localPort) → \(port.connectionConfig.host)")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+
+            Spacer()
+
+            Button(action: onStop) {
+                Image(systemName: "stop.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(.red.opacity(0.8))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(.systemGray6))
+        .cornerRadius(8)
     }
 }
 
