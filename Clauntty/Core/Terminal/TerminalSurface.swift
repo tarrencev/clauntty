@@ -1984,6 +1984,18 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             }
         }
 
+        // Check if Option modifier is active from accessory bar
+        if accessoryBar.consumeOptionModifier() {
+            // Option+key sends ESC + key (meta key behavior)
+            if let data = text.data(using: .utf8) {
+                var escapedData = Data([0x1B])  // ESC
+                escapedData.append(data)
+                onTextInput?(escapedData)
+                Logger.clauntty.debugOnly("Option+'\(text)' sent as ESC + key")
+                return
+            }
+        }
+
         // Convert newline (LF) to carriage return (CR) for terminal compatibility
         // iOS keyboard sends \n but terminals expect \r for Enter
         let terminalText = text.replacingOccurrences(of: "\n", with: "\r")

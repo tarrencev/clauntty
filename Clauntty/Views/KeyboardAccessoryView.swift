@@ -22,6 +22,12 @@ class KeyboardAccessoryView: UIView {
         }
     }
 
+    /// Whether Option modifier is active (held via long-press on Ctrl)
+    private var isOptionActive = false
+
+    /// Currently visible tooltip (for hold-down feedback)
+    private var activeTooltip: HoldTooltip?
+
     /// Track if keyboard is currently visible (for icon state)
     private(set) var isKeyboardShown = true
 
@@ -56,6 +62,15 @@ class KeyboardAccessoryView: UIView {
 
     /// Ctrl button reference for state updates
     private let ctrlButton = UIButton(type: .system)
+
+    /// Ctrl container reference for expanded hit area
+    private var ctrlContainer: UIView?
+
+    /// Tab button reference for tooltip positioning
+    private let tabButton = UIButton(type: .system)
+
+    /// Tab container reference for expanded hit area
+    private var tabContainer: UIView?
 
     /// Keyboard toggle button
     private let keyboardToggleButton = UIButton(type: .system)
@@ -129,14 +144,14 @@ class KeyboardAccessoryView: UIView {
     }
 
     private func setupStackViews() {
-        // Left stack view - evenly distributed
+        // Left stack view - evenly distributed, centered vertically
         leftStackView.axis = .horizontal
         leftStackView.distribution = .equalSpacing
         leftStackView.alignment = .center
         leftStackView.translatesAutoresizingMaskIntoConstraints = false
         containerEffectView.contentView.addSubview(leftStackView)
 
-        // Right stack view - evenly distributed
+        // Right stack view - evenly distributed, centered vertically
         rightStackView.axis = .horizontal
         rightStackView.distribution = .equalSpacing
         rightStackView.alignment = .center
@@ -158,24 +173,39 @@ class KeyboardAccessoryView: UIView {
         keyboardToggleButton.addAction(UIAction { [weak self] _ in
             self?.toggleKeyboard()
         }, for: .touchUpInside)
-        leftStackView.addArrangedSubview(keyboardToggleButton)
+        let keyboardContainer = createButtonWithHint(keyboardToggleButton, hint: nil)
+        leftStackView.addArrangedSubview(keyboardContainer)
 
         // Esc button
-        let escButton = createIconButton("escape", accessibilityId: "Esc") { [weak self] in
+        let escButton = createIconButton("escape", accessibilityId: "Esc", tooltip: "esc") { [weak self] in
             self?.sendEscape()
         }
-        leftStackView.addArrangedSubview(escButton)
+        let escContainer = createButtonWithHint(escButton, hint: nil)
+        leftStackView.addArrangedSubview(escContainer)
 
         // Tab button with long-press for Shift+Tab
-        let tabButton = createIconButton("arrow.right.to.line", accessibilityId: "Tab") { [weak self] in
-            self?.sendTab()
-        }
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(handleTabLongPress(_:)))
-        longPress.minimumPressDuration = 0.3
-        tabButton.addGestureRecognizer(longPress)
-        leftStackView.addArrangedSubview(tabButton)
+        // Gestures on container so hint label is part of hit area
+        tabButton.setImage(
+            UIImage(systemName: "arrow.right.to.line")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
+            ),
+            for: .normal
+        )
+        tabButton.tintColor = .label
+        tabButton.accessibilityIdentifier = "Tab"
+        tabButton.isAccessibilityElement = true
+        tabButton.isUserInteractionEnabled = false  // Let container handle touches
+        let tabContainerView = createButtonWithHint(tabButton, hint: "⇧⇥")
+        let tabTap = UITapGestureRecognizer(target: self, action: #selector(handleTabTap))
+        tabContainerView.addGestureRecognizer(tabTap)
+        let tabLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handleTabLongPress(_:)))
+        tabLongPress.minimumPressDuration = 0.2
+        tabContainerView.addGestureRecognizer(tabLongPress)
+        leftStackView.addArrangedSubview(tabContainerView)
+        tabContainer = tabContainerView
 
-        // Ctrl button
+        // Ctrl button (tap toggles Ctrl, long-press activates Option)
+        // Gestures on container so hint label is part of hit area
         ctrlButton.setImage(
             UIImage(systemName: "control")?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
@@ -185,15 +215,20 @@ class KeyboardAccessoryView: UIView {
         ctrlButton.tintColor = .label
         ctrlButton.accessibilityIdentifier = "Ctrl"
         ctrlButton.isAccessibilityElement = true
-        ctrlButton.addAction(UIAction { [weak self] _ in
-            self?.toggleCtrl()
-        }, for: .touchUpInside)
-        leftStackView.addArrangedSubview(ctrlButton)
+        ctrlButton.isUserInteractionEnabled = false  // Let container handle touches
+        let ctrlContainerView = createButtonWithHint(ctrlButton, hint: "⌥")
+        let ctrlTap = UITapGestureRecognizer(target: self, action: #selector(handleCtrlTap))
+        ctrlContainerView.addGestureRecognizer(ctrlTap)
+        let ctrlLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCtrlLongPress(_:)))
+        ctrlLongPress.minimumPressDuration = 0.2
+        ctrlContainerView.addGestureRecognizer(ctrlLongPress)
+        leftStackView.addArrangedSubview(ctrlContainerView)
+        ctrlContainer = ctrlContainerView
 
         // Trailing spacer (creates gap before nipple)
         leftStackView.addArrangedSubview(leftTrailingSpacer)
 
-        // Right section buttons: spacer, ^C, ^L, ^D, ^O, spacer
+        // Right section buttons: spacer, ^C, ^O, ^B, Enter, spacer
 
         // Leading spacer (creates gap after nipple)
         rightStackView.addArrangedSubview(rightLeadingSpacer)
@@ -203,20 +238,20 @@ class KeyboardAccessoryView: UIView {
         }
         rightStackView.addArrangedSubview(ctrlCButton)
 
-        let ctrlLButton = createTextButton("^L") { [weak self] in
-            self?.sendCtrlL()
-        }
-        rightStackView.addArrangedSubview(ctrlLButton)
-
-        let ctrlDButton = createTextButton("^D") { [weak self] in
-            self?.sendCtrlD()
-        }
-        rightStackView.addArrangedSubview(ctrlDButton)
-
         let ctrlOButton = createTextButton("^O") { [weak self] in
             self?.sendCtrlO()
         }
         rightStackView.addArrangedSubview(ctrlOButton)
+
+        let ctrlBButton = createTextButton("^B") { [weak self] in
+            self?.sendCtrlB()
+        }
+        rightStackView.addArrangedSubview(ctrlBButton)
+
+        let enterButton = createIconButton("return", accessibilityId: "Enter", tooltip: "↵") { [weak self] in
+            self?.sendEnter()
+        }
+        rightStackView.addArrangedSubview(enterButton)
 
         // Trailing spacer (creates gap at right edge)
         rightStackView.addArrangedSubview(rightTrailingSpacer)
@@ -302,7 +337,7 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Button Creation
 
-    private func createIconButton(_ systemName: String, accessibilityId: String, action: @escaping () -> Void) -> UIButton {
+    private func createIconButton(_ systemName: String, accessibilityId: String, tooltip: String? = nil, action: @escaping () -> Void) -> UIButton {
         let button = UIButton(type: .system)
         button.setImage(
             UIImage(systemName: systemName)?.withConfiguration(
@@ -314,10 +349,20 @@ class KeyboardAccessoryView: UIView {
         button.accessibilityIdentifier = accessibilityId
         button.isAccessibilityElement = true
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+
+        // Add tooltip feedback on touch
+        if let tooltipText = tooltip {
+            button.addAction(UIAction { [weak self] _ in
+                self?.showTooltip(above: button, text: tooltipText)
+            }, for: .touchDown)
+            button.addAction(UIAction { [weak self] _ in
+                self?.hideTooltipAfterDelay()
+            }, for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        }
         return button
     }
 
-    private func createTextButton(_ title: String, action: @escaping () -> Void) -> UIButton {
+    private func createTextButton(_ title: String, tooltip: String? = nil, action: @escaping () -> Void) -> UIButton {
         let button = UIButton(type: .system)
         button.setTitle(title, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: textSize, weight: .medium)
@@ -325,7 +370,37 @@ class KeyboardAccessoryView: UIView {
         button.accessibilityIdentifier = title
         button.isAccessibilityElement = true
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+
+        // Add tooltip feedback on touch
+        let tooltipText = tooltip ?? title
+        button.addAction(UIAction { [weak self] _ in
+            self?.showTooltip(above: button, text: tooltipText)
+        }, for: .touchDown)
+        button.addAction(UIAction { [weak self] _ in
+            self?.hideTooltipAfterDelay()
+        }, for: [.touchUpInside, .touchUpOutside, .touchCancel])
         return button
+    }
+
+    private func createHintLabel(_ text: String) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = .systemFont(ofSize: 8, weight: .medium)
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        return label
+    }
+
+    private func createButtonWithHint(_ button: UIButton, hint: String?) -> UIStackView {
+        let hintLabel = createHintLabel(hint ?? "")
+        if hint == nil {
+            hintLabel.alpha = 0  // Invisible spacer to maintain consistent height
+        }
+        let stack = UIStackView(arrangedSubviews: [button, hintLabel])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 1
+        return stack
     }
 
     private func updateCtrlButton() {
@@ -367,46 +442,9 @@ class KeyboardAccessoryView: UIView {
         updateButtonsVisibility()
     }
 
-    /// Hide/show extra buttons based on keyboard visibility
+    /// Update bar state (no longer hides buttons - bar stays fully expanded)
     private func updateButtonsVisibility() {
-        // When keyboard hidden, only show keyboard toggle button and nipple
-        // Hide spacers and all other buttons
-
-        // Left stack: hide spacers and all buttons except keyboard toggle
-        for subview in leftStackView.arrangedSubviews {
-            if subview === keyboardToggleButton {
-                // Keyboard toggle always visible
-                continue
-            }
-            // Hide spacers and other buttons in collapsed mode
-            subview.isHidden = !isKeyboardShown
-        }
-
-        // Hide all right stack (buttons and spacers)
-        for subview in rightStackView.arrangedSubviews {
-            subview.isHidden = !isKeyboardShown
-        }
-
-        // Toggle container constraints for expanded/collapsed mode
-        if isKeyboardShown {
-            // Expanded mode - full width
-            containerCenterXConstraint.isActive = false
-            containerWidthConstraint.isActive = false
-            containerLeadingConstraint.isActive = true
-            containerTrailingConstraint.isActive = true
-        } else {
-            // Collapsed mode - centered, fixed width
-            containerLeadingConstraint.isActive = false
-            containerTrailingConstraint.isActive = false
-            containerCenterXConstraint.isActive = true
-            containerWidthConstraint.isActive = true
-        }
-
-        // Animate the layout change
-        UIView.animate(withDuration: 0.25) {
-            self.layoutIfNeeded()
-        }
-
+        // Bar is always fully expanded - just log state change
         let frame = containerEffectView.frame
         Logger.clauntty.debugOnly("[AccessoryBar] updateButtonsVisibility: isKeyboardShown=\(self.isKeyboardShown), frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.width))x\(Int(frame.height))")
     }
@@ -421,10 +459,77 @@ class KeyboardAccessoryView: UIView {
         onKeyInput?(Data([0x09]))
     }
 
+    @objc private func handleTabTap() {
+        showTooltip(above: tabButton, text: "⇥")
+        hideTooltipAfterDelay()
+        sendTab()
+    }
+
     @objc private func handleTabLongPress(_ gesture: UILongPressGestureRecognizer) {
-        if gesture.state == .began {
+        switch gesture.state {
+        case .began:
             sendShiftTab()
+            showTooltip(above: tabButton, text: "⇧⇥")
+        case .ended, .cancelled:
+            hideTooltip()
+        default:
+            break
         }
+    }
+
+    @objc private func handleCtrlTap() {
+        // Show ⌃ for Ctrl, or ⌥ if deactivating Option
+        let tooltipText = isOptionActive ? "⌥" : "⌃"
+        showTooltip(above: ctrlButton, text: tooltipText)
+        hideTooltipAfterDelay()
+        toggleCtrl()
+    }
+
+    @objc private func handleCtrlLongPress(_ gesture: UILongPressGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            if isOptionActive {
+                // If Option already active, deactivate it
+                isOptionActive = false
+                resetToCtrlState()
+            } else {
+                // Clear Ctrl if active, activate Option (sticky)
+                isCtrlActive = false
+                isOptionActive = true
+                showOptionState()
+                showTooltip(above: ctrlButton, text: "⌥")
+            }
+        case .ended, .cancelled:
+            hideTooltip()
+        default:
+            break
+        }
+    }
+
+    private func showOptionState() {
+        UIView.animate(withDuration: 0.15) {
+            self.ctrlButton.transform = CGAffineTransform(translationX: 0, y: -3)
+        }
+        ctrlButton.setImage(
+            UIImage(systemName: "option")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
+            ),
+            for: .normal
+        )
+        ctrlButton.tintColor = .systemBlue
+    }
+
+    private func resetToCtrlState() {
+        UIView.animate(withDuration: 0.15) {
+            self.ctrlButton.transform = .identity
+        }
+        ctrlButton.setImage(
+            UIImage(systemName: "control")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
+            ),
+            for: .normal
+        )
+        updateCtrlButton()  // Restore correct color based on isCtrlActive
     }
 
     private func sendShiftTab() {
@@ -433,6 +538,13 @@ class KeyboardAccessoryView: UIView {
     }
 
     private func toggleCtrl() {
+        // If Option is active, tapping deactivates Option
+        if isOptionActive {
+            isOptionActive = false
+            resetToCtrlState()
+            return
+        }
+        // Otherwise toggle Ctrl as normal
         isCtrlActive.toggle()
     }
 
@@ -444,6 +556,61 @@ class KeyboardAccessoryView: UIView {
             return true
         }
         return false
+    }
+
+    /// Check if Option is active and consume the state
+    /// Returns true if Option was active (and clears it)
+    func consumeOptionModifier() -> Bool {
+        if isOptionActive {
+            isOptionActive = false
+            resetToCtrlState()
+            return true
+        }
+        return false
+    }
+
+    // MARK: - Tooltip
+
+    private func showTooltip(above button: UIView, text: String) {
+        hideTooltip()
+
+        let tooltip = HoldTooltip(text: text)
+        addSubview(tooltip)
+
+        // Position tooltip above the button
+        tooltip.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            tooltip.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            tooltip.bottomAnchor.constraint(equalTo: containerEffectView.topAnchor, constant: -4),
+        ])
+
+        // Animate in
+        tooltip.alpha = 0
+        tooltip.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        UIView.animate(withDuration: 0.15) {
+            tooltip.alpha = 1
+            tooltip.transform = .identity
+        }
+
+        activeTooltip = tooltip
+    }
+
+    private func hideTooltip() {
+        guard let tooltip = activeTooltip else { return }
+        UIView.animate(withDuration: 0.1, animations: {
+            tooltip.alpha = 0
+            tooltip.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+        }, completion: { _ in
+            tooltip.removeFromSuperview()
+        })
+        activeTooltip = nil
+    }
+
+    private func hideTooltipAfterDelay() {
+        // Brief delay so the tooltip is visible momentarily
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.hideTooltip()
+        }
     }
 
     private func sendArrow(_ direction: ArrowNippleView.Direction) {
@@ -470,16 +637,16 @@ class KeyboardAccessoryView: UIView {
         onKeyInput?(Data([0x03]))  // ETX
     }
 
-    private func sendCtrlL() {
-        onKeyInput?(Data([0x0C]))  // FF
-    }
-
-    private func sendCtrlD() {
-        onKeyInput?(Data([0x04]))  // EOT
-    }
-
     private func sendCtrlO() {
         onKeyInput?(Data([0x0F]))  // SI (Ctrl+O)
+    }
+
+    private func sendCtrlB() {
+        onKeyInput?(Data([0x02]))  // STX (Ctrl+B)
+    }
+
+    private func sendEnter() {
+        onKeyInput?(Data([0x0D]))  // CR (Return/Enter)
     }
 
     override var intrinsicContentSize: CGSize {
@@ -489,11 +656,13 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Touch Handling
 
-    /// Override hitTest to pass through touches outside the visible container and nipple
-    /// This allows taps on transparent areas to go to the terminal behind
+    /// Horizontal padding to expand hit areas for Tab and Ctrl buttons
+    private let expandedHitPadding: CGFloat = 12
+
+    /// Override hitTest to expand vertical hit areas for all buttons
+    /// and horizontal hit areas for Tab and Ctrl
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         // Check nipple FIRST - it's on top and overlaps the container
-        // The nipple is centered on screen and should have priority for touches
         let nippleFrame = nippleContainerView.frame
         if nippleFrame.contains(point) {
             let nipplePoint = convert(point, to: nippleContainerView)
@@ -505,22 +674,57 @@ class KeyboardAccessoryView: UIView {
             return nippleContainerView
         }
 
-        // Then check if the touch is within the visible container frame
+        // Check if touch is within the horizontal bounds of the container
+        // but expand vertical bounds to the full bar area
         let containerFrame = containerEffectView.frame
-        if containerFrame.contains(point) {
-            // Convert to container's coordinate space and do hit test
-            let containerPoint = convert(point, to: containerEffectView)
+        let expandedFrame = CGRect(
+            x: containerFrame.minX,
+            y: bounds.minY,
+            width: containerFrame.width,
+            height: bounds.height
+        )
+
+        if expandedFrame.contains(point) {
+            // Check expanded hit areas for Ctrl and Tab first (they need wider touch targets)
+            if let ctrl = ctrlContainer {
+                let ctrlFrame = ctrl.convert(ctrl.bounds, to: self)
+                let expandedCtrlFrame = ctrlFrame.insetBy(dx: -expandedHitPadding, dy: 0)
+                    .union(CGRect(x: ctrlFrame.minX - expandedHitPadding, y: bounds.minY,
+                                  width: ctrlFrame.width + expandedHitPadding * 2, height: bounds.height))
+                if expandedCtrlFrame.contains(point) {
+                    Logger.clauntty.verbose("[AccessoryBar] hitTest: expanded Ctrl hit")
+                    return ctrl
+                }
+            }
+
+            if let tab = tabContainer {
+                let tabFrame = tab.convert(tab.bounds, to: self)
+                let expandedTabFrame = CGRect(x: tabFrame.minX - expandedHitPadding, y: bounds.minY,
+                                              width: tabFrame.width + expandedHitPadding * 2, height: bounds.height)
+                if expandedTabFrame.contains(point) {
+                    Logger.clauntty.verbose("[AccessoryBar] hitTest: expanded Tab hit")
+                    return tab
+                }
+            }
+
+            // Find which button is at this horizontal position by checking both stacks
+            // Use the center Y of the container for the hit test
+            let centerY = containerFrame.midY
+            let adjustedPoint = CGPoint(x: point.x, y: centerY)
+            let containerPoint = convert(adjustedPoint, to: containerEffectView)
+
             if let hitView = containerEffectView.hitTest(containerPoint, with: event) {
-                Logger.clauntty.verbose("[AccessoryBar] hitTest: hit container subview \(String(describing: type(of: hitView)))")
+                Logger.clauntty.verbose("[AccessoryBar] hitTest: expanded hit on \(String(describing: type(of: hitView)))")
                 return hitView
             }
-            // If no subview handles it, return the container itself (for touches on background)
-            Logger.clauntty.verbose("[AccessoryBar] hitTest: hit container background")
+
+            // If no subview handles it, return the container itself
+            Logger.clauntty.verbose("[AccessoryBar] hitTest: hit container background (expanded)")
             return containerEffectView
         }
 
         // Touch is outside visible elements - pass through to views below
-        Logger.clauntty.verbose("[AccessoryBar] hitTest: passing through at \(Int(point.x)),\(Int(point.y)), containerFrame=\(Int(containerFrame.origin.x)),\(Int(containerFrame.origin.y)),\(Int(containerFrame.width))x\(Int(containerFrame.height))")
+        Logger.clauntty.verbose("[AccessoryBar] hitTest: passing through at \(Int(point.x)),\(Int(point.y))")
         return nil
     }
 }
@@ -627,6 +831,42 @@ class CollapsedKeyboardBar: UIView {
 
     override var intrinsicContentSize: CGSize {
         return CGSize(width: barHeight + nippleSize + 16, height: barHeight)
+    }
+}
+
+// MARK: - Hold Tooltip
+
+/// Small floating tooltip shown when holding down a button for alternate action
+private class HoldTooltip: UIView {
+
+    init(text: String) {
+        super.init(frame: .zero)
+
+        backgroundColor = .systemBackground
+        layer.cornerRadius = 6
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = 0.15
+        layer.shadowRadius = 4
+        layer.shadowOffset = CGSize(width: 0, height: 2)
+
+        let label = UILabel()
+        label.text = text
+        label.font = .systemFont(ofSize: 14, weight: .medium)
+        label.textColor = .label
+        label.textAlignment = .center
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 
