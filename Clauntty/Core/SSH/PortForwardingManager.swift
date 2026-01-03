@@ -45,7 +45,10 @@ class PortForwardingManager {
         let remotePort = self.remotePort
         let sshChannel = self.sshChannel
 
-        let bootstrap = ServerBootstrap(group: eventLoopGroup)
+        // IMPORTANT: Use the SSH channel's event loop for both server and child channels
+        // This ensures all port forwarding happens on the same event loop as SSH,
+        // avoiding cross-event-loop scheduling issues with the singleton group
+        let bootstrap = ServerBootstrap(group: sshChannel.eventLoop)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
             .childChannelInitializer { [weak self] inboundChannel in
                 guard let self = self else {
@@ -88,17 +91,33 @@ class PortForwardingManager {
         remoteHost: String,
         remotePort: Int
     ) -> EventLoopFuture<Void> {
-        Logger.clauntty.debug("PortForwarding: new connection from \(String(describing: inboundChannel.remoteAddress))")
+        Logger.clauntty.debugOnly("PortForwarding: new connection from \(String(describing: inboundChannel.remoteAddress)), sshChannel.isActive=\(sshChannel.isActive)")
 
-        // Get the SSH handler from the main connection channel
+        // Check if SSH channel is still active
+        guard sshChannel.isActive else {
+            Logger.clauntty.error("PortForwarding: SSH channel is inactive, cannot forward")
+            return inboundChannel.eventLoop.makeFailedFuture(PortForwardingError.notRunning)
+        }
+
+        guard let originatorAddress = inboundChannel.remoteAddress else {
+            Logger.clauntty.error("PortForwarding: inbound channel has no remote address")
+            return inboundChannel.eventLoop.makeFailedFuture(PortForwardingError.missingOriginatorAddress)
+        }
+
+        // Create paired glue handlers to relay data between channels
+        let (sshSide, localSide) = GlueHandler.matchedPair()
+
+        // Both channels are on the same event loop (SSH channel's event loop)
+        // so we can do everything synchronously without hopping
         return sshChannel.pipeline.handler(type: NIOSSHHandler.self).flatMap { sshHandler -> EventLoopFuture<Void> in
-            let promise = inboundChannel.eventLoop.makePromise(of: Channel.self)
+
+            let promise = sshChannel.eventLoop.makePromise(of: Channel.self)
 
             // Create directTCPIP channel to remote
             let directTCPIP = SSHChannelType.DirectTCPIP(
                 targetHost: remoteHost,
                 targetPort: remotePort,
-                originatorAddress: inboundChannel.remoteAddress!
+                originatorAddress: originatorAddress
             )
 
             sshHandler.createChannel(promise, channelType: .directTCPIP(directTCPIP)) { childChannel, channelType in
@@ -106,24 +125,19 @@ class PortForwardingManager {
                     return childChannel.eventLoop.makeFailedFuture(PortForwardingError.invalidChannelType)
                 }
 
-                return childChannel.eventLoop.makeCompletedFuture {
-                    // Create paired glue handlers to relay data between channels
-                    let (sshSide, localSide) = GlueHandler.matchedPair()
-
-                    // Add handlers to SSH child channel
-                    let childSync = childChannel.pipeline.syncOperations
-                    try childSync.addHandler(SSHWrapperHandler())
-                    try childSync.addHandler(sshSide)
-
-                    // Add handler to local inbound channel
-                    let inboundSync = inboundChannel.pipeline.syncOperations
-                    try inboundSync.addHandler(localSide)
+                // Add handlers to both channels (they're on the same event loop)
+                return childChannel.pipeline.addHandlers([SSHWrapperHandler(), sshSide]).flatMap { _ in
+                    inboundChannel.pipeline.addHandler(localSide)
                 }
             }
 
-            return promise.futureResult.map { _ in
-                Logger.clauntty.debug("PortForwarding: tunnel established to \(remoteHost):\(remotePort)")
-            }
+            return promise.futureResult.map { _ in }
+        }.map {
+            Logger.clauntty.debugOnly("PortForwarding: tunnel established to \(remoteHost):\(remotePort)")
+        }.flatMapError { error in
+            Logger.clauntty.error("PortForwarding: directTCPIP channel failed: \(error)")
+            inboundChannel.close(promise: nil)
+            return inboundChannel.eventLoop.makeFailedFuture(error)
         }
     }
 }
@@ -133,6 +147,7 @@ class PortForwardingManager {
 enum PortForwardingError: Error, LocalizedError {
     case managerDeallocated
     case invalidChannelType
+    case missingOriginatorAddress
     case notRunning
 
     var errorDescription: String? {
@@ -141,6 +156,8 @@ enum PortForwardingError: Error, LocalizedError {
             return "Port forwarding manager was deallocated"
         case .invalidChannelType:
             return "Invalid SSH channel type for port forwarding"
+        case .missingOriginatorAddress:
+            return "Inbound channel has no originator address"
         case .notRunning:
             return "Port forwarding is not running"
         }
@@ -156,9 +173,7 @@ final class GlueHandler {
     private var pendingRead: Bool = false
 
     private init() {}
-}
 
-extension GlueHandler {
     static func matchedPair() -> (GlueHandler, GlueHandler) {
         let first = GlueHandler()
         let second = GlueHandler()
@@ -207,11 +222,19 @@ extension GlueHandler: ChannelDuplexHandler {
         if context.channel.isWritable {
             self.partner?.partnerBecameWritable()
         }
+        context.read()
     }
 
     func handlerRemoved(context: ChannelHandlerContext) {
         self.context = nil
         self.partner = nil
+    }
+
+    func channelActive(context: ChannelHandlerContext) {
+        // Notify partner that we're now writable and trigger read to start data flow
+        self.partner?.partnerBecameWritable()
+        context.read()
+        context.fireChannelActive()
     }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
@@ -276,5 +299,10 @@ final class SSHWrapperHandler: ChannelDuplexHandler {
         let data = self.unwrapOutboundIn(data)
         let wrapped = SSHChannelData(type: .channel, data: .byteBuffer(data))
         context.write(self.wrapOutboundOut(wrapped), promise: promise)
+    }
+
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        Logger.clauntty.error("SSHWrapperHandler error: \(error)")
+        context.fireErrorCaught(error)
     }
 }
