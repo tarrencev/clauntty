@@ -1,5 +1,6 @@
 import UIKit
 import os.log
+import Combine
 
 /// Keyboard accessory bar with terminal-specific keys and arrow "nipple"
 /// iOS Notes-style pill shape with fixed center nipple and evenly distributed buttons
@@ -50,6 +51,12 @@ class KeyboardAccessoryView: UIView {
     private(set) var isRecording = false {
         didSet {
             updateMicButtonAppearance()
+            // Clear or show glow based on recording state
+            if isRecording {
+                animateGlowOn()
+            } else {
+                clearGlowImmediately()
+            }
         }
     }
 
@@ -85,7 +92,7 @@ class KeyboardAccessoryView: UIView {
     private var isPushToTalkMode = false
 
     /// Threshold to distinguish tap from hold (seconds)
-    private let holdThreshold: TimeInterval = 0.3
+    private let holdThreshold: TimeInterval = 0.2
 
     // MARK: - Views
 
@@ -143,6 +150,30 @@ class KeyboardAccessoryView: UIView {
     private let rightLeadingSpacer = UIView()
     private let rightTrailingSpacer = UIView()
 
+    /// Drag handle pill inside the bar at top (like Find My)
+    private let dragHandle: UIView = {
+        let view = UIView()
+        view.backgroundColor = UIColor.systemGray  // Lighter for visibility
+        view.layer.cornerRadius = 2
+        return view
+    }()
+
+    /// Shadow host view for glow effect (UIVisualEffectView clips shadows)
+    private let shadowHostView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .clear
+        return view
+    }()
+
+    /// Glow layer inside shadow host (casts the colored shadow)
+    private let glowLayer = CALayer()
+
+    /// Glow color for recording
+    private let glowColor: UIColor = .systemBlue
+
+    /// Combine subscriptions for audio level updates
+    private var cancellables = Set<AnyCancellable>()
+
     // MARK: - Constraints
 
     private var containerLeadingConstraint: NSLayoutConstraint!
@@ -152,13 +183,17 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Constants
 
-    private let barHeight: CGFloat = 44
+    private let barHeight: CGFloat = 60  // Taller to fit drag handle above nipple with spacing
     private let nippleSize: CGFloat = 36
     private let horizontalPadding: CGFloat = 12
     private let iconSize: CGFloat = 12
     private let textSize: CGFloat = 14
     private let topPadding: CGFloat = 8
+    private let bottomPadding: CGFloat = 6  // Minimal space between bar and keyboard
     private let collapsedWidth: CGFloat = 110  // keyboard button + nipple + padding
+    private let dragHandleWidth: CGFloat = 48  // Longer handle
+    private let dragHandleHeight: CGFloat = 4
+    private let dragHandleTopOffset: CGFloat = 6  // Space from top of container
 
     // MARK: - Initialization
 
@@ -176,34 +211,77 @@ class KeyboardAccessoryView: UIView {
         backgroundColor = .clear
 
         setupContainerView()
+        setupGlowEffect()  // Setup shadow-based glow on container
+        setupDragHandle()  // Must be after container so it's added inside
         setupNipple()
         setupStackViews()
         setupButtons()
         setupConstraints()
         setupDismissGestures()
+        setupAudioLevelObserver()
+    }
+
+    // MARK: - Drag Handle Setup
+
+    private func setupDragHandle() {
+        // Add drag handle INSIDE the container (like Find My app)
+        dragHandle.translatesAutoresizingMaskIntoConstraints = false
+        containerEffectView.contentView.addSubview(dragHandle)
+    }
+
+    // MARK: - Glow Effect Setup
+
+    private func setupGlowEffect() {
+        // Inner border for crisp edge (pulses with audio)
+        containerEffectView.layer.borderWidth = 0
+        containerEffectView.layer.borderColor = UIColor.systemBlue.cgColor
+
+        // Glow layer - colored layer that casts the shadow
+        glowLayer.backgroundColor = UIColor.clear.cgColor
+        glowLayer.cornerRadius = barHeight / 2
+        shadowHostView.layer.insertSublayer(glowLayer, at: 0)
+
+        // Shadow properties on the shadow host
+        shadowHostView.layer.cornerRadius = barHeight / 2
+        shadowHostView.layer.shadowColor = UIColor.systemBlue.cgColor
+        shadowHostView.layer.shadowRadius = 15
+        shadowHostView.layer.shadowOpacity = 0
+        shadowHostView.layer.shadowOffset = .zero
+    }
+
+    private func setupAudioLevelObserver() {
+        SpeechManager.shared.$audioLevel
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] level in
+                self?.updateGlowForAudioLevel(level)
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Container Setup
 
     private func setupContainerView() {
+        // Add shadow host view BEHIND container (for glow effect)
+        shadowHostView.translatesAutoresizingMaskIntoConstraints = false
+        shadowHostView.layer.cornerRadius = barHeight / 2
+        addSubview(shadowHostView)
+
+        // Add container on top
         containerEffectView.layer.cornerRadius = barHeight / 2
         containerEffectView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(containerEffectView)
     }
 
     private func setupNipple() {
-        // Nipple is added to self so it can be truly screen-centered
+        // Nipple is added to containerEffectView so it moves with the container during drag
         nippleContainerView.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(nippleContainerView)
+        containerEffectView.contentView.addSubview(nippleContainerView)
 
         nippleView.onArrowInput = { [weak self] direction in
             self?.sendArrow(direction)
         }
         nippleView.translatesAutoresizingMaskIntoConstraints = false
         nippleContainerView.addSubview(nippleView)
-
-        // Bring nipple to front
-        bringSubviewToFront(nippleContainerView)
     }
 
     private func setupStackViews() {
@@ -350,14 +428,27 @@ class KeyboardAccessoryView: UIView {
         containerWidthConstraint.isActive = false
 
         NSLayoutConstraint.activate([
+            // Shadow host view - same position as container
+            shadowHostView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
+            shadowHostView.heightAnchor.constraint(equalToConstant: barHeight),
+            shadowHostView.leadingAnchor.constraint(equalTo: containerEffectView.leadingAnchor),
+            shadowHostView.trailingAnchor.constraint(equalTo: containerEffectView.trailingAnchor),
+
+            // Container view
             containerLeadingConstraint,
             containerTrailingConstraint,
             containerEffectView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
             containerEffectView.heightAnchor.constraint(equalToConstant: barHeight),
 
-            // Nipple container - centered on SELF (screen center)
-            nippleContainerView.centerXAnchor.constraint(equalTo: centerXAnchor),
-            nippleContainerView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding + (barHeight - nippleSize) / 2),
+            // Drag handle - INSIDE container at top center (like Find My)
+            dragHandle.centerXAnchor.constraint(equalTo: containerEffectView.contentView.centerXAnchor),
+            dragHandle.topAnchor.constraint(equalTo: containerEffectView.contentView.topAnchor, constant: dragHandleTopOffset),
+            dragHandle.widthAnchor.constraint(equalToConstant: dragHandleWidth),
+            dragHandle.heightAnchor.constraint(equalToConstant: dragHandleHeight),
+
+            // Nipple container - centered horizontally within container, positioned toward bottom (leaving room for drag handle)
+            nippleContainerView.centerXAnchor.constraint(equalTo: containerEffectView.contentView.centerXAnchor),
+            nippleContainerView.bottomAnchor.constraint(equalTo: containerEffectView.contentView.bottomAnchor, constant: -6),
             nippleContainerView.widthAnchor.constraint(equalToConstant: nippleSize),
             nippleContainerView.heightAnchor.constraint(equalToConstant: nippleSize),
 
@@ -367,17 +458,17 @@ class KeyboardAccessoryView: UIView {
             nippleView.leadingAnchor.constraint(equalTo: nippleContainerView.leadingAnchor),
             nippleView.trailingAnchor.constraint(equalTo: nippleContainerView.trailingAnchor),
 
-            // Left stack view - from container leading to nipple (no fixed padding, spacers create gaps)
+            // Left stack view - aligned with nipple (toward bottom)
             leftStackView.leadingAnchor.constraint(equalTo: containerEffectView.contentView.leadingAnchor, constant: 8),
             leftStackView.trailingAnchor.constraint(equalTo: nippleContainerView.leadingAnchor, constant: -4),
-            leftStackView.centerYAnchor.constraint(equalTo: containerEffectView.contentView.centerYAnchor),
-            leftStackView.heightAnchor.constraint(equalToConstant: barHeight - 8),
+            leftStackView.centerYAnchor.constraint(equalTo: nippleContainerView.centerYAnchor),
+            leftStackView.heightAnchor.constraint(equalToConstant: nippleSize),
 
-            // Right stack view - from nipple to container trailing (no fixed padding, spacers create gaps)
+            // Right stack view - aligned with nipple (toward bottom)
             rightStackView.leadingAnchor.constraint(equalTo: nippleContainerView.trailingAnchor, constant: 4),
             rightStackView.trailingAnchor.constraint(equalTo: containerEffectView.contentView.trailingAnchor, constant: -8),
-            rightStackView.centerYAnchor.constraint(equalTo: containerEffectView.contentView.centerYAnchor),
-            rightStackView.heightAnchor.constraint(equalToConstant: barHeight - 8),
+            rightStackView.centerYAnchor.constraint(equalTo: nippleContainerView.centerYAnchor),
+            rightStackView.heightAnchor.constraint(equalToConstant: nippleSize),
         ])
     }
 
@@ -396,6 +487,12 @@ class KeyboardAccessoryView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         updateConstraintsForSafeArea()
+
+        // Update glow layer frame to match shadow host
+        glowLayer.frame = shadowHostView.bounds
+
+        // Ensure proper z-ordering
+        sendSubviewToBack(shadowHostView)
     }
 
     override func safeAreaInsetsDidChange() {
@@ -496,8 +593,8 @@ class KeyboardAccessoryView: UIView {
         let tintColor: UIColor
 
         if isRecording {
-            iconName = "mic.circle.fill"
-            tintColor = .systemRed
+            iconName = "mic.fill"
+            tintColor = UIColor.systemBlue.withAlphaComponent(0.8)  // Light blue tint
         } else if isSpeechModelDownloading {
             iconName = "mic.fill"
             tintColor = .systemBlue  // Blue while downloading
@@ -526,9 +623,21 @@ class KeyboardAccessoryView: UIView {
         isSpeechModelReady = ready
     }
 
-    /// Update recording state
+    /// Update recording state (glow handled by didSet on isRecording)
     func setRecording(_ recording: Bool) {
         isRecording = recording
+    }
+
+    /// Immediately clear all glow effects (called when recording stops)
+    private func clearGlowImmediately() {
+        // Disable implicit animations for immediate effect
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        containerEffectView.layer.borderWidth = 0
+        containerEffectView.layer.borderColor = UIColor.clear.cgColor
+        shadowHostView.layer.shadowOpacity = 0
+        glowLayer.backgroundColor = UIColor.clear.cgColor
+        CATransaction.commit()
     }
 
     /// Update speech model downloading state
@@ -549,23 +658,81 @@ class KeyboardAccessoryView: UIView {
         downloadProgressView.progress = CGFloat(downloadProgress)
     }
 
+    // MARK: - Glow Effect
+
+    private func updateGlowForAudioLevel(_ level: Float) {
+        guard isRecording else {
+            return
+        }
+
+        // Scale level for visibility (audio levels are often low)
+        let scaledLevel = min(level * 4, 1.0)
+
+        // Map audio level to blue intensity
+        // Low audio = subtle glow, high audio = strong glow
+        let minBorderWidth: CGFloat = 1.0
+        let maxBorderWidth: CGFloat = 3.5
+        let minShadowOpacity: Float = 0.3
+        let maxShadowOpacity: Float = 0.9
+        let minShadowRadius: CGFloat = 8
+        let maxShadowRadius: CGFloat = 20
+
+        let borderWidth = minBorderWidth + CGFloat(scaledLevel) * (maxBorderWidth - minBorderWidth)
+        let shadowOpacity = minShadowOpacity + scaledLevel * (maxShadowOpacity - minShadowOpacity)
+        let shadowRadius = minShadowRadius + CGFloat(scaledLevel) * (maxShadowRadius - minShadowRadius)
+
+        // Update border and shadow based on audio level
+        containerEffectView.layer.borderWidth = borderWidth
+        shadowHostView.layer.shadowOpacity = shadowOpacity
+        shadowHostView.layer.shadowRadius = shadowRadius
+        glowLayer.backgroundColor = glowColor.withAlphaComponent(CGFloat(shadowOpacity)).cgColor
+    }
+
+    private func animateGlowOn() {
+        // Set blue color and initial glow
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.15)
+        containerEffectView.layer.borderColor = glowColor.cgColor
+        containerEffectView.layer.borderWidth = 1.0
+        shadowHostView.layer.shadowColor = glowColor.cgColor
+        shadowHostView.layer.shadowOpacity = 0.3
+        glowLayer.backgroundColor = glowColor.withAlphaComponent(0.3).cgColor
+        CATransaction.commit()
+    }
+
     // MARK: - Dismiss Gestures
 
     private func setupDismissGestures() {
-        // Swipe down = instant dismiss
+        // All keyboard show/hide gestures are on the drag handle only
+
+        // Swipe down on drag handle = instant dismiss
         let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToDismiss))
         swipeDown.direction = .down
-        containerEffectView.addGestureRecognizer(swipeDown)
+        dragHandle.addGestureRecognizer(swipeDown)
 
-        // Swipe up = instant show keyboard
+        // Swipe up on drag handle = instant show keyboard
         let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToShow))
         swipeUp.direction = .up
-        containerEffectView.addGestureRecognizer(swipeUp)
+        dragHandle.addGestureRecognizer(swipeUp)
 
-        // Drag/pan = interactive dismiss/show
+        // Drag/pan on drag handle = interactive dismiss/show (like Find My)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture))
         pan.delegate = self
-        containerEffectView.addGestureRecognizer(pan)
+        dragHandle.addGestureRecognizer(pan)
+
+        // Tap on drag handle to toggle keyboard
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleDragHandleTap))
+        dragHandle.addGestureRecognizer(tap)
+    }
+
+    @objc private func handleDragHandleTap() {
+        if isKeyboardShown {
+            Logger.clauntty.debugOnly("[AccessoryBar] drag handle tap to dismiss")
+            onDismissKeyboard?()
+        } else {
+            Logger.clauntty.debugOnly("[AccessoryBar] drag handle tap to show keyboard")
+            onShowKeyboard?()
+        }
     }
 
     @objc private func handleSwipeToDismiss(_ gesture: UISwipeGestureRecognizer) {
@@ -921,8 +1088,8 @@ class KeyboardAccessoryView: UIView {
     }
 
     override var intrinsicContentSize: CGSize {
-        // topPadding above bar + barHeight + bottom padding for spacing to keyboard
-        return CGSize(width: UIView.noIntrinsicMetric, height: topPadding + barHeight + 8)
+        // topPadding above bar + barHeight + bottomPadding for spacing to keyboard
+        return CGSize(width: UIView.noIntrinsicMetric, height: topPadding + barHeight + bottomPadding)
     }
 
     // MARK: - Touch Handling
@@ -937,7 +1104,7 @@ class KeyboardAccessoryView: UIView {
         // UIKit normally skips hidden views, but we override hitTest so we must check manually
         guard !isHidden else { return nil }
 
-        // Check nipple FIRST - it's on top and overlaps the container
+        // Check nipple - it's on top and overlaps the container
         let nippleFrame = nippleContainerView.frame
         if nippleFrame.contains(point) {
             let nipplePoint = convert(point, to: nippleContainerView)
@@ -960,6 +1127,14 @@ class KeyboardAccessoryView: UIView {
         )
 
         if expandedFrame.contains(point) {
+            // Check drag handle first - it's at the top center of the container
+            let handleFrameInSelf = dragHandle.convert(dragHandle.bounds, to: self)
+            let expandedHandleFrame = handleFrameInSelf.insetBy(dx: -25, dy: -10)
+            if expandedHandleFrame.contains(point) {
+                Logger.clauntty.verbose("[AccessoryBar] hitTest: hit drag handle")
+                return dragHandle
+            }
+
             // Check expanded hit areas for Ctrl and Tab first (they need wider touch targets)
             if let ctrl = ctrlContainer {
                 let ctrlFrame = ctrl.convert(ctrl.bounds, to: self)
@@ -979,6 +1154,19 @@ class KeyboardAccessoryView: UIView {
                 if expandedTabFrame.contains(point) {
                     Logger.clauntty.verbose("[AccessoryBar] hitTest: expanded Tab hit")
                     return tab
+                }
+            }
+
+            // Expanded hit area for mic button (larger touch target for speech-to-text)
+            if let mic = micContainer {
+                let micFrame = mic.convert(mic.bounds, to: self)
+                // Extra padding for mic - it's an important button
+                let micPadding: CGFloat = 16
+                let expandedMicFrame = CGRect(x: micFrame.minX - micPadding, y: bounds.minY,
+                                              width: micFrame.width + micPadding * 2, height: bounds.height)
+                if expandedMicFrame.contains(point) {
+                    Logger.clauntty.verbose("[AccessoryBar] hitTest: expanded Mic hit")
+                    return micButton
                 }
             }
 
@@ -1013,10 +1201,11 @@ extension KeyboardAccessoryView: UIGestureRecognizerDelegate {
     }
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // Only begin pan if it's primarily vertical (for dismiss)
+        // Only begin pan if it's primarily vertical (for keyboard show/hide)
         if let pan = gestureRecognizer as? UIPanGestureRecognizer {
             let velocity = pan.velocity(in: self)
-            return abs(velocity.y) > abs(velocity.x) && velocity.y > 0
+            // Allow both up and down vertical gestures on drag handle
+            return abs(velocity.y) > abs(velocity.x)
         }
         return true
     }

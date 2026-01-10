@@ -38,6 +38,7 @@ final class SpeechManager: ObservableObject {
     }
     @Published private(set) var isRecording: Bool = false
     @Published private(set) var isTranscribing: Bool = false
+    @Published private(set) var audioLevel: Float = 0  // 0-1 normalized for UI visualization
 
     // MARK: - Audio Capture
 
@@ -256,10 +257,8 @@ final class SpeechManager: ObservableObject {
 
             isRecording = true
             Logger.clauntty.debugOnly("SpeechManager: Recording started")
-
-            // Haptic feedback
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.impactOccurred()
+            // Note: Haptic feedback is triggered by KeyboardAccessoryView.startRecordingWithFeedback()
+            // to ensure immediate feedback on user touch
 
         } catch {
             Logger.clauntty.error("SpeechManager: Failed to start recording: \(error)")
@@ -303,8 +302,15 @@ final class SpeechManager: ObservableObject {
             monoSamples = resampled
         }
 
-        // Append to buffer (thread-safe via MainActor)
+        // Calculate RMS for audio level metering
+        let sumOfSquares = monoSamples.reduce(0) { $0 + $1 * $1 }
+        let rms = sqrt(sumOfSquares / Float(monoSamples.count))
+        // Normalize: typical speech ~0.01-0.1 RMS, scale up for UI visibility
+        let normalizedLevel = min(rms * 8, 1.0)
+
+        // Append to buffer and update audio level (thread-safe via MainActor)
         Task { @MainActor in
+            self.audioLevel = normalizedLevel
             self.audioBuffer.append(contentsOf: monoSamples)
         }
     }
@@ -315,10 +321,6 @@ final class SpeechManager: ObservableObject {
 
         stopAudioEngine()
         isRecording = false
-
-        // Haptic feedback
-        let generator = UIImpactFeedbackGenerator(style: .light)
-        generator.impactOccurred()
 
         Logger.clauntty.debugOnly("SpeechManager: Recording stopped, captured \(self.audioBuffer.count) samples")
 
@@ -346,6 +348,7 @@ final class SpeechManager: ObservableObject {
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine?.stop()
         audioEngine = nil
+        audioLevel = 0
 
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }

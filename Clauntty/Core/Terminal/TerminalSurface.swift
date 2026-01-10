@@ -321,7 +321,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Full width spanning the window (minus safe area handled inside the view)
             accessoryBar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
             accessoryBar.trailingAnchor.constraint(equalTo: window.trailingAnchor),
-            accessoryBar.heightAnchor.constraint(equalToConstant: 60),
+            accessoryBar.heightAnchor.constraint(equalToConstant: 74),  // topPadding(8) + barHeight(60) + bottomPadding(6)
             accessoryBarBottomConstraint!
         ])
         Logger.clauntty.debugOnly("[KB] Added accessory bar to window")
@@ -359,7 +359,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Keyboard accessory bar with terminal keys
     private let accessoryBar: KeyboardAccessoryView = {
-        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 60))
+        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 74))
         return bar
     }()
 
@@ -667,11 +667,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Height to reserve for accessory bar when keyboard is visible (expanded bar)
     /// The bar is positioned above the keyboard but still within our view bounds
-    private let expandedAccessoryBarHeight: CGFloat = 68  // 60pt bar + 8pt top padding
+    private let expandedAccessoryBarHeight: CGFloat = 74  // topPadding(8) + barHeight(60) + bottomPadding(6)
 
     /// Height to reserve for accessory bar when keyboard is hidden (collapsed bar)
     /// Includes safe area margin since bar is at bottom of screen
-    private let collapsedAccessoryBarHeight: CGFloat = 76  // 60pt bar + 16pt margin for safe area
+    private let collapsedAccessoryBarHeight: CGFloat = 82  // 74pt bar + 8pt margin for safe area
 
     private func updateSizeForKeyboard() {
         // Recalculate size accounting for accessory bar position
