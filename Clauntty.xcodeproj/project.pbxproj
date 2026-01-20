@@ -645,7 +645,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty.tests;
 				PRODUCT_NAME = ClaunttyTests;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -664,7 +664,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "";
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty.tests;
 				PRODUCT_NAME = ClaunttyTests;
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.0;
@@ -814,7 +814,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -844,7 +844,7 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
@@ -866,7 +866,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = NO;
@@ -890,7 +890,7 @@
 					"@loader_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.clauntty.app.uitests;
+				PRODUCT_BUNDLE_IDENTIFIER = com.octerm.clauntty.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = NO;

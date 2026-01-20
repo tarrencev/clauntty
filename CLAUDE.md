@@ -81,7 +81,7 @@ xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
 # Install and launch on iPhone
 xcrun devicectl device install app --device "iPhone 16" \
   ~/Library/Developer/Xcode/DerivedData/Clauntty-*/Build/Products/Debug-iphoneos/Clauntty.app
-xcrun devicectl device process launch --device "iPhone 16" com.clauntty.app
+xcrun devicectl device process launch --device "iPhone 16" com.octerm.clauntty
 ```
 
 ## Logging & Debugging
@@ -144,7 +144,7 @@ Verbose logs are disabled by default (too noisy). Enable with `CLAUNTTY_VERBOSE=
 ./scripts/sim.sh debug devbox
 
 # Manual: set environment variable before launch
-SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted com.clauntty.app
+SIMCTL_CHILD_CLAUNTTY_VERBOSE=1 xcrun simctl launch booted com.octerm.clauntty
 
 # In Xcode: Edit Scheme → Run → Arguments → Environment Variables
 # Add: CLAUNTTY_VERBOSE = 1
@@ -305,7 +305,7 @@ export fn ghostty_surface_write_pty_output(
 
 ## Key Info
 
-- **Bundle ID**: `com.clauntty.app`
+- **Bundle ID**: `com.octerm.clauntty`
 - **iOS target**: 17.0+
 - **Zig version**: 0.15.2+
 - **Dependencies**: swift-nio-ssh 0.12.0, swift-nio 2.92.0

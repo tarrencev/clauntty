@@ -14,7 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUNDLE_ID="com.clauntty.app"
+BUNDLE_ID="com.octerm.clauntty"
 SCREENSHOTS_DIR="$PROJECT_DIR/screenshots"
 DEVICE_NAME="iPhone 17"
 
@@ -607,7 +607,7 @@ for el in data:
         fi
 
         # Find the app's preferences plist
-        plist_path=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application/*/Library/Preferences/com.clauntty.app.plist 2>/dev/null | head -1)
+        plist_path=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application/*/Library/Preferences/com.octerm.clauntty.plist 2>/dev/null | head -1)
 
         if [ -z "$plist_path" ]; then
             echo -e "${RED}App preferences not found. Run the app first.${NC}"
@@ -742,7 +742,7 @@ end tell
         app_container=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application -name "clauntty_dump.txt" -exec dirname {} \; 2>/dev/null | head -1)
         if [ -z "$app_container" ]; then
             # Try to find by bundle ID
-            app_container=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application -name ".com.apple.mobile_container_manager.metadata.plist" -exec sh -c 'grep -l "com.clauntty.app" "$1" 2>/dev/null && dirname "$1"' _ {} \; 2>/dev/null | head -1)
+            app_container=$(find ~/Library/Developer/CoreSimulator/Devices/"$udid"/data/Containers/Data/Application -name ".com.apple.mobile_container_manager.metadata.plist" -exec sh -c 'grep -l "com.octerm.clauntty" "$1" 2>/dev/null && dirname "$1"' _ {} \; 2>/dev/null | head -1)
             if [ -n "$app_container" ]; then
                 app_container="$app_container/Documents"
             fi

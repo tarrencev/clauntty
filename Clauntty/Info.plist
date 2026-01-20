@@ -8,7 +8,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>com.clauntty.app</string>
+			<string>com.octerm.clauntty</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>clauntty</string>

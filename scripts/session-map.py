@@ -28,9 +28,9 @@ def pull_ios_prefs(temp_dir: Path) -> dict:
     subprocess.run([
         "xcrun", "devicectl", "device", "copy", "from",
         "--device", "iPhone 16",
-        "--source", "Library/Preferences/com.clauntty.app.plist",
+        "--source", "Library/Preferences/com.octerm.clauntty.plist",
         "--domain-type", "appDataContainer",
-        "--domain-identifier", "com.clauntty.app",
+        "--domain-identifier", "com.octerm.clauntty",
         "--destination", str(plist_path)
     ], capture_output=True)
 

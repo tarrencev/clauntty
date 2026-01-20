@@ -12,7 +12,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-BUNDLE_ID="com.clauntty.app"
+BUNDLE_ID="com.octerm.clauntty"
 SIMULATOR="iPhone 17"
 SCREENSHOTS_DIR="$PROJECT_DIR/screenshots"
 

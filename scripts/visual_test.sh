@@ -9,7 +9,7 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 GOLDEN_DIR="$PROJECT_DIR/Tests/Golden"
 ACTUAL_DIR="/tmp/clauntty_visual"
 SIMULATOR="iPhone 17"
-BUNDLE_ID="com.clauntty.app"
+BUNDLE_ID="com.octerm.clauntty"
 
 # Colors
 RED='\033[0;31m'
