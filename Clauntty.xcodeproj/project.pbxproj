@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -20,6 +20,8 @@
 		80724EA1EC07D3EC2C46051C /* SessionPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A3663E616FC97D48E5888C /* SessionPickerView.swift */; };
 		80EDB74F6E178CE8B64DDA99 /* Themes in Resources */ = {isa = PBXBuildFile; fileRef = ABF7282BEC77B8743E5A14F7 /* Themes */; };
 		85A5D1B86EBFEF5CC1A4C478 /* ThemePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CF1104A268D6275CA1C3278 /* ThemePickerView.swift */; };
+		870F343B2F231F51002BB6F1 /* RtachClient in Frameworks */ = {isa = PBXBuildFile; productRef = C8000003 /* RtachClient */; };
+		870F343C2F231F51002BB6F1 /* FluidAudio in Frameworks */ = {isa = PBXBuildFile; productRef = C8000004 /* FluidAudio */; };
 		876C56362EFB1A6E00B28BC1 /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = C8000000 /* NIOCore */; };
 		876C56372EFB1A6E00B28BC1 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = C8000001 /* NIOPosix */; };
 		876C56382EFB1A6E00B28BC1 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = C8000002 /* NIOSSH */; };
@@ -48,7 +50,6 @@
 		C0000018 /* SessionTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000018 /* SessionTabBar.swift */; };
 		C0000019 /* RtachDeployer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000019 /* RtachDeployer.swift */; };
 		C0000020 /* GhosttyKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; };
-		C0000021 /* GhosttyKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = C1000020 /* GhosttyKit.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		C0000022 /* rtach in Resources */ = {isa = PBXBuildFile; fileRef = C1000022 /* rtach */; };
 		C0000023 /* WordList.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000023 /* WordList.swift */; };
 		C0000024 /* NotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1000024 /* NotificationManager.swift */; };
@@ -85,20 +86,6 @@
 			remoteInfo = Clauntty;
 		};
 /* End PBXContainerItemProxy section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		C4000003 /* Embed Frameworks */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 10;
-			files = (
-				C0000021 /* GhosttyKit.xcframework in Embed Frameworks */,
-			);
-			name = "Embed Frameworks";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
@@ -176,6 +163,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				870F343C2F231F51002BB6F1 /* FluidAudio in Frameworks */,
+				870F343B2F231F51002BB6F1 /* RtachClient in Frameworks */,
 				876C56382EFB1A6E00B28BC1 /* NIOSSH in Frameworks */,
 				876C56372EFB1A6E00B28BC1 /* NIOPosix in Frameworks */,
 				876C56362EFB1A6E00B28BC1 /* NIOCore in Frameworks */,
@@ -220,7 +209,6 @@
 			children = (
 				2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */,
 			);
-			name = Theme;
 			path = Theme;
 			sourceTree = "<group>";
 		};
@@ -400,7 +388,6 @@
 				66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */,
 				BCA3DCC2DFC28098F2BC7C70 /* LiquidGlassTabBarRepresentable.swift */,
 			);
-			name = LiquidGlassTabBar;
 			path = LiquidGlassTabBar;
 			sourceTree = "<group>";
 		};
@@ -423,7 +410,6 @@
 				C4000001 /* Sources */,
 				C2000001 /* Frameworks */,
 				C4000002 /* Resources */,
-				C4000003 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -799,7 +785,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = NZQXHAG9A3;
+				DEVELOPMENT_TEAM = 65533RB4LC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Clauntty/Info.plist;
@@ -829,7 +815,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = NZQXHAG9A3;
+				DEVELOPMENT_TEAM = 65533RB4LC;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Clauntty/Info.plist;

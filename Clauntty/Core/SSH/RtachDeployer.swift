@@ -413,12 +413,8 @@ class RtachDeployer {
 
     // MARK: - Claude Code Settings
 
-    /// Deploy Claude Code settings (PATH and permissions for helper scripts)
+    /// Deploy Claude Code settings (permissions for helper scripts)
     private func deployClaudeHook() async throws {
-        // Get the actual home directory path (don't use $HOME which won't expand in settings.json)
-        let homeDir = try await connection.executeCommand("echo $HOME")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
         // Read existing settings
         let output = try await connection.executeCommand(
             "cat \(Self.claudeSettingsPath) 2>/dev/null || echo '{}'"
@@ -428,22 +424,11 @@ class RtachDeployer {
         guard let data = jsonString.data(using: .utf8),
               var settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             // Invalid JSON or empty, create fresh settings
-            try await writeClaudeSettings([:], homeDir: homeDir)
+            try await writeClaudeSettings([:])
             return
         }
 
         var needsUpdate = false
-
-        // Add PATH for helper scripts (Claude sessions only)
-        // Include /usr/bin:/bin to ensure system tools like base64 are available in Claude Code snapshots
-        // Use expanded home directory path since Claude Code doesn't expand $HOME
-        var env = settings["env"] as? [String: String] ?? [:]
-        let expectedPath = "/usr/bin:/bin:\(homeDir)/.clauntty/bin"
-        if env["PATH"] != expectedPath {
-            env["PATH"] = expectedPath
-            settings["env"] = env
-            needsUpdate = true
-        }
 
         // Add permissions for helper scripts (use full path to avoid PATH issues)
         var permissions = settings["permissions"] as? [String: Any] ?? [:]
@@ -463,29 +448,27 @@ class RtachDeployer {
         settings["permissions"] = permissions
 
         if needsUpdate {
-            try await writeClaudeSettings(settings, homeDir: homeDir)
-            Logger.clauntty.debugOnly("Claude Code settings deployed (env, permissions)")
+            try await writeClaudeSettings(settings)
+            Logger.clauntty.debugOnly("Claude Code settings deployed (permissions)")
         } else {
             Logger.clauntty.debugOnly("Claude Code settings already configured")
         }
     }
 
     /// Write Claude settings to remote server
-    private func writeClaudeSettings(_ settings: [String: Any], homeDir: String) async throws {
+    private func writeClaudeSettings(_ settings: [String: Any]) async throws {
         // Ensure directory exists
         _ = try await connection.executeCommand("mkdir -p ~/.claude")
 
-        // Build settings with env and permissions if empty
+        // Build settings with permissions if empty (don't set env.PATH - it overrides system PATH)
         var finalSettings = settings
         if finalSettings.isEmpty {
             finalSettings = [
-                "env": [
-                    "PATH": "/usr/bin:/bin:\(homeDir)/.clauntty/bin"
-                ],
                 "permissions": [
                     "allow": [
                         "Bash(~/.clauntty/bin/forward-port:*)",
-                        "Bash(~/.clauntty/bin/open-tab:*)"
+                        "Bash(~/.clauntty/bin/open-tab:*)",
+                        "Bash(~/.clauntty/bin/open-browser:*)"
                     ]
                 ]
             ]
@@ -650,21 +633,21 @@ class RtachDeployer {
         // Get full platform info for binary selection
         let platform = try await connection.getRemotePlatform()
 
-        // Get the binary from app bundle
-        guard let binaryData = loadBundledBinary(for: platform) else {
+        // Get the compressed binary from app bundle
+        guard let compressedData = loadBundledBinary(for: platform) else {
             throw RtachDeployError.binaryNotFound("\(platform.os)-\(platform.arch)")
         }
 
-        Logger.clauntty.debugOnly("Uploading rtach binary for \(platform.os)-\(platform.arch) (\(binaryData.count) bytes)...")
+        Logger.clauntty.debugOnly("Uploading rtach binary for \(platform.os)-\(platform.arch) (\(compressedData.count) bytes compressed)...")
 
         // Create directory
         _ = try await connection.executeCommand("mkdir -p ~/.clauntty/bin")
 
-        // Upload binary via stdin
-        // Use 'cat > file' trick since we don't have SFTP
+        // Upload compressed binary and decompress on server
+        // This saves bandwidth (binaries compress ~50%)
         try await connection.executeWithStdin(
-            "cat > \(Self.remoteBinPath) && chmod +x \(Self.remoteBinPath)",
-            stdinData: binaryData
+            "gunzip -c > \(Self.remoteBinPath) && chmod +x \(Self.remoteBinPath)",
+            stdinData: compressedData
         )
 
         // Verify deployment
@@ -682,6 +665,7 @@ class RtachDeployer {
         Logger.clauntty.debugOnly("rtach deployed successfully")
     }
 
+    /// Load compressed (.gz) rtach binary from app bundle
     private func loadBundledBinary(for platform: RemotePlatform) -> Data? {
         let binaryName: String
         switch (platform.os, platform.arch) {
@@ -697,17 +681,17 @@ class RtachDeployer {
             return nil
         }
 
-        // Try to find in bundle
-        if let url = Bundle.main.url(forResource: binaryName, withExtension: nil, subdirectory: "rtach") {
+        // Try to find compressed binary in bundle (App Store requirement: no standalone executables)
+        if let url = Bundle.main.url(forResource: binaryName, withExtension: "gz", subdirectory: "rtach") {
             return try? Data(contentsOf: url)
         }
 
         // Fallback: try without subdirectory
-        if let url = Bundle.main.url(forResource: binaryName, withExtension: nil) {
+        if let url = Bundle.main.url(forResource: binaryName, withExtension: "gz") {
             return try? Data(contentsOf: url)
         }
 
-        Logger.clauntty.error("Could not find bundled binary: \(binaryName)")
+        Logger.clauntty.error("Could not find bundled binary: \(binaryName).gz")
         return nil
     }
 }
