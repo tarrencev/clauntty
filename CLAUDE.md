@@ -84,6 +84,38 @@ xcrun devicectl device install app --device "iPhone 16" \
 xcrun devicectl device process launch --device "iPhone 16" com.octerm.clauntty
 ```
 
+## TestFlight Upload
+
+Archive and upload to App Store Connect for TestFlight distribution:
+
+```bash
+# 1. Clean and archive
+rm -rf build
+xcodebuild -project Clauntty.xcodeproj -scheme Clauntty clean -quiet
+xcodebuild -project Clauntty.xcodeproj -scheme Clauntty \
+  -destination 'generic/platform=iOS' \
+  -archivePath build/Clauntty.xcarchive archive \
+  -allowProvisioningUpdates
+
+# 2. Export and upload to App Store Connect
+xcodebuild -exportArchive \
+  -archivePath build/Clauntty.xcarchive \
+  -exportOptionsPlist ExportOptions.plist \
+  -exportPath build/export \
+  -allowProvisioningUpdates
+```
+
+**Prerequisites:**
+- Distribution certificate: "Apple Distribution: Octerm Technologies, Inc."
+- App created in App Store Connect with bundle ID `com.octerm.clauntty`
+- `ExportOptions.plist` in project root (team ID: 65533RB4LC)
+
+**After upload:**
+1. Go to [appstoreconnect.apple.com](https://appstoreconnect.apple.com)
+2. Select Clauntty → TestFlight
+3. Wait for build processing (5-30 min)
+4. Add testers (internal = instant, external = requires review)
+
 ## Logging & Debugging
 
 ### Log Levels
