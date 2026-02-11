@@ -108,7 +108,14 @@ class LiquidGlassTabBar: UIView {
 
     /// Plus button
     private let plusButton: UIVisualEffectView = {
-        let effect = UIBlurEffect(style: .systemMaterial)
+        let effect: UIVisualEffect
+        if #available(iOS 26.0, *) {
+            let glassEffect = UIGlassEffect()
+            glassEffect.isInteractive = true
+            effect = glassEffect
+        } else {
+            effect = UIBlurEffect(style: .systemMaterial)
+        }
         let view = UIVisualEffectView(effect: effect)
         view.clipsToBounds = true
         return view

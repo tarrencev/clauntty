@@ -4,7 +4,7 @@ import Combine
 
 /// Keyboard accessory bar with terminal-specific keys and arrow "nipple"
 /// iOS Notes-style pill shape with fixed center nipple and evenly distributed buttons
-/// Uses UIBlurEffect for broad iOS SDK compatibility
+/// Uses UIGlassEffect on iOS 26+ or UIBlurEffect fallback for native look
 class KeyboardAccessoryView: UIView {
 
     /// Callback for sending key data to the terminal
@@ -98,7 +98,14 @@ class KeyboardAccessoryView: UIView {
 
     /// Main container (pill-shaped glass effect)
     private let containerEffectView: UIVisualEffectView = {
-        let effect = UIBlurEffect(style: .systemMaterial)
+        let effect: UIVisualEffect
+        if #available(iOS 26.0, *) {
+            let glassEffect = UIGlassEffect()
+            glassEffect.isInteractive = true
+            effect = glassEffect
+        } else {
+            effect = UIBlurEffect(style: .systemMaterial)
+        }
         let view = UIVisualEffectView(effect: effect)
         view.clipsToBounds = true
         return view
@@ -1219,7 +1226,14 @@ class CollapsedKeyboardBar: UIView {
     // MARK: - Views
 
     private let containerEffectView: UIVisualEffectView = {
-        let effect = UIBlurEffect(style: .systemMaterial)
+        let effect: UIVisualEffect
+        if #available(iOS 26.0, *) {
+            let glassEffect = UIGlassEffect()
+            glassEffect.isInteractive = true
+            effect = glassEffect
+        } else {
+            effect = UIBlurEffect(style: .systemMaterial)
+        }
         let view = UIVisualEffectView(effect: effect)
         view.clipsToBounds = true
         return view
