@@ -34,20 +34,27 @@ Most mobile terminals lose your session when the app backgrounds or your connect
 
 - Xcode 15+
 - iOS 17.0+
-- Zig 0.15.2+ (for building GhosttyKit and rtach)
+- asdf (for managing Zig)
+- Zig 0.15.2+ (installed automatically by `./scripts/init.sh` by default)
 
 ## Building
 
 ### Prerequisites
 
-Build the dependencies first (from monorepo root):
+Initialize submodules, fetch `libxev` (if needed), ensure Zig via asdf, and build dependencies:
+
+```bash
+./scripts/init.sh
+```
+
+Manual build (if needed, from repo root):
 
 ```bash
 # Build GhosttyKit framework
-cd ../ghostty && zig build -Demit-xcframework -Doptimize=ReleaseFast
+cd ghostty && asdf exec zig build -Demit-xcframework -Demit-macos-app=false -Doptimize=ReleaseFast
 
 # Build rtach binaries (auto-copies to Resources/)
-cd ../rtach && zig build cross
+cd ../rtach && asdf exec zig build cross
 ```
 
 ### Simulator

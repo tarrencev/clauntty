@@ -1,0 +1,7 @@
+[submodule "ghostty"]
+	path = ghostty
+	url = https://github.com/eriklangille/ghostty.git
+	branch = clauntty
+[submodule "rtach"]
+	path = rtach
+	url = https://github.com/tarrencev/rtach.git
