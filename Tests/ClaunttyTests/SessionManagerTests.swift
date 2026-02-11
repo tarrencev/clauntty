@@ -102,6 +102,87 @@ final class SessionManagerTests: XCTestCase {
         XCTAssertEqual(sessionManager.activeSessionId, session2.id)
     }
 
+    func testSwitchToNextTerminalSessionWrapsAround() {
+        let config = SavedConnection(
+            name: "Server",
+            host: "server.com",
+            port: 22,
+            username: "user",
+            authMethod: .password
+        )
+
+        let session1 = sessionManager.createSession(for: config)
+        let session2 = sessionManager.createSession(for: config)
+        let session3 = sessionManager.createSession(for: config)
+
+        sessionManager.switchTo(session1)
+        sessionManager.switchToNextTerminalSession()
+        XCTAssertEqual(sessionManager.activeSessionId, session2.id)
+
+        sessionManager.switchToNextTerminalSession()
+        XCTAssertEqual(sessionManager.activeSessionId, session3.id)
+
+        sessionManager.switchToNextTerminalSession()
+        XCTAssertEqual(sessionManager.activeSessionId, session1.id)
+    }
+
+    func testSwitchToPreviousTerminalSessionWrapsAround() {
+        let config = SavedConnection(
+            name: "Server",
+            host: "server.com",
+            port: 22,
+            username: "user",
+            authMethod: .password
+        )
+
+        let session1 = sessionManager.createSession(for: config)
+        let session2 = sessionManager.createSession(for: config)
+        let session3 = sessionManager.createSession(for: config)
+
+        sessionManager.switchTo(session1)
+        sessionManager.switchToPreviousTerminalSession()
+        XCTAssertEqual(sessionManager.activeSessionId, session3.id)
+
+        sessionManager.switchToPreviousTerminalSession()
+        XCTAssertEqual(sessionManager.activeSessionId, session2.id)
+    }
+
+    func testSwitchToNextTerminalSessionNoOpWhenSingleSession() {
+        let config = SavedConnection(
+            name: "Server",
+            host: "server.com",
+            port: 22,
+            username: "user",
+            authMethod: .password
+        )
+
+        let session = sessionManager.createSession(for: config)
+        sessionManager.switchToNextTerminalSession()
+
+        XCTAssertEqual(sessionManager.activeSessionId, session.id)
+    }
+
+    func testSwitchToTerminalSessionNoOpWhenWebTabIsActive() {
+        let config = SavedConnection(
+            name: "Server",
+            host: "server.com",
+            port: 22,
+            username: "user",
+            authMethod: .password
+        )
+
+        _ = sessionManager.createSession(for: config)
+        _ = sessionManager.createSession(for: config)
+        let webId = UUID()
+        sessionManager.activeTab = .web(webId)
+
+        sessionManager.switchToNextTerminalSession()
+        XCTAssertEqual(sessionManager.activeTab, .web(webId))
+
+        sessionManager.switchToPreviousTerminalSession()
+        XCTAssertEqual(sessionManager.activeTab, .web(webId))
+    }
+
     // MARK: - Session Closing
 
     func testCloseSession() {

@@ -13,6 +13,7 @@ BUNDLE_ID="com.octerm.clauntty"
 DEVICE_NAME=""
 TEAM_ID=""
 ALLOW_PROVISIONING_UPDATES=1
+LOCAL_CONFIG="${PROJECT_DIR}/.deploy-device.local"
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -25,6 +26,7 @@ Usage: $0 --device "<device name>" [options]
 
 Required:
   --device <name>            Device name shown by xcrun devicectl (for example: "tarrence")
+                             (optional if DEVICE_NAME is set in $LOCAL_CONFIG)
 
 Options:
   --project <path>           Xcode project (default: $PROJECT)
@@ -52,6 +54,13 @@ fail() {
   echo -e "${RED}$1${NC}"
   exit 1
 }
+
+# Load optional local config before parsing CLI args.
+# CLI arguments override any config values.
+if [[ -f "$LOCAL_CONFIG" ]]; then
+  # shellcheck disable=SC1090
+  source "$LOCAL_CONFIG"
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

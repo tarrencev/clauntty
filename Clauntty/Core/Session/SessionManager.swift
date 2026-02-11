@@ -979,6 +979,26 @@ class SessionManager: ObservableObject {
         }
     }
 
+    /// Switch to the next open terminal session (wraps around)
+    func switchToNextTerminalSession() {
+        guard sessions.count > 1 else { return }
+        guard case .terminal(let activeId) = activeTab else { return }
+        guard let currentIndex = sessions.firstIndex(where: { $0.id == activeId }) else { return }
+
+        let nextIndex = (currentIndex + 1) % sessions.count
+        switchTo(sessions[nextIndex])
+    }
+
+    /// Switch to the previous open terminal session (wraps around)
+    func switchToPreviousTerminalSession() {
+        guard sessions.count > 1 else { return }
+        guard case .terminal(let activeId) = activeTab else { return }
+        guard let currentIndex = sessions.firstIndex(where: { $0.id == activeId }) else { return }
+
+        let previousIndex = (currentIndex - 1 + sessions.count) % sessions.count
+        switchTo(sessions[previousIndex])
+    }
+
     /// Find and switch to the next terminal session that is waiting for input
     /// Returns true if a tab was found and switched to
     @discardableResult

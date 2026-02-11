@@ -31,3 +31,6 @@ screenshots/
 # Local dependency checkouts (not tracked in this repo)
 ghostty/
 rtach/
+
+# Local deploy config
+.deploy-device.local
