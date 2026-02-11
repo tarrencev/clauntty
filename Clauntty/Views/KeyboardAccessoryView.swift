@@ -31,6 +31,9 @@ class KeyboardAccessoryView: UIView {
     /// Callback to cancel recording without transcribing
     var onCancelRecording: (() -> Void)?
 
+    /// Callback when joystick is double-tapped
+    var onJoystickDoubleTap: (() -> Void)?
+
     /// Whether Ctrl modifier is active (sticky toggle)
     private var isCtrlActive = false {
         didSet {
@@ -150,11 +153,10 @@ class KeyboardAccessoryView: UIView {
     private let rightLeadingSpacer = UIView()
     private let rightTrailingSpacer = UIView()
 
-    /// Drag handle pill inside the bar at top (like Find My)
-    private let dragHandle: UIView = {
+    /// Invisible gesture zone at top of bar for keyboard show/hide gestures
+    private let dragGestureZoneView: UIView = {
         let view = UIView()
-        view.backgroundColor = UIColor.systemGray  // Lighter for visibility
-        view.layer.cornerRadius = 2
+        view.backgroundColor = .clear
         return view
     }()
 
@@ -183,17 +185,15 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Constants
 
-    private let barHeight: CGFloat = 60  // Taller to fit drag handle above nipple with spacing
+    private let barHeight: CGFloat = 52
     private let nippleSize: CGFloat = 36
     private let horizontalPadding: CGFloat = 12
     private let iconSize: CGFloat = 12
     private let textSize: CGFloat = 14
-    private let topPadding: CGFloat = 8
-    private let bottomPadding: CGFloat = 6  // Minimal space between bar and keyboard
+    private let topPadding: CGFloat = 4
+    private let bottomPadding: CGFloat = 4
     private let collapsedWidth: CGFloat = 110  // keyboard button + nipple + padding
-    private let dragHandleWidth: CGFloat = 48  // Longer handle
-    private let dragHandleHeight: CGFloat = 4
-    private let dragHandleTopOffset: CGFloat = 6  // Space from top of container
+    private let dragGestureZoneHeight: CGFloat = 16
 
     // MARK: - Initialization
 
@@ -212,7 +212,7 @@ class KeyboardAccessoryView: UIView {
 
         setupContainerView()
         setupGlowEffect()  // Setup shadow-based glow on container
-        setupDragHandle()  // Must be after container so it's added inside
+        setupGestureZone()
         setupNipple()
         setupStackViews()
         setupButtons()
@@ -221,12 +221,11 @@ class KeyboardAccessoryView: UIView {
         setupAudioLevelObserver()
     }
 
-    // MARK: - Drag Handle Setup
+    // MARK: - Gesture Zone Setup
 
-    private func setupDragHandle() {
-        // Add drag handle INSIDE the container (like Find My app)
-        dragHandle.translatesAutoresizingMaskIntoConstraints = false
-        containerEffectView.contentView.addSubview(dragHandle)
+    private func setupGestureZone() {
+        dragGestureZoneView.translatesAutoresizingMaskIntoConstraints = false
+        containerEffectView.contentView.addSubview(dragGestureZoneView)
     }
 
     // MARK: - Glow Effect Setup
@@ -279,6 +278,9 @@ class KeyboardAccessoryView: UIView {
 
         nippleView.onArrowInput = { [weak self] direction in
             self?.sendArrow(direction)
+        }
+        nippleView.onDoubleTap = { [weak self] in
+            self?.onJoystickDoubleTap?()
         }
         nippleView.translatesAutoresizingMaskIntoConstraints = false
         nippleContainerView.addSubview(nippleView)
@@ -440,15 +442,15 @@ class KeyboardAccessoryView: UIView {
             containerEffectView.topAnchor.constraint(equalTo: topAnchor, constant: topPadding),
             containerEffectView.heightAnchor.constraint(equalToConstant: barHeight),
 
-            // Drag handle - INSIDE container at top center (like Find My)
-            dragHandle.centerXAnchor.constraint(equalTo: containerEffectView.contentView.centerXAnchor),
-            dragHandle.topAnchor.constraint(equalTo: containerEffectView.contentView.topAnchor, constant: dragHandleTopOffset),
-            dragHandle.widthAnchor.constraint(equalToConstant: dragHandleWidth),
-            dragHandle.heightAnchor.constraint(equalToConstant: dragHandleHeight),
+            // Top gesture zone for keyboard show/hide
+            dragGestureZoneView.topAnchor.constraint(equalTo: containerEffectView.contentView.topAnchor),
+            dragGestureZoneView.leadingAnchor.constraint(equalTo: containerEffectView.contentView.leadingAnchor),
+            dragGestureZoneView.trailingAnchor.constraint(equalTo: containerEffectView.contentView.trailingAnchor),
+            dragGestureZoneView.heightAnchor.constraint(equalToConstant: dragGestureZoneHeight),
 
-            // Nipple container - centered horizontally within container, positioned toward bottom (leaving room for drag handle)
+            // Nipple container - centered within container
             nippleContainerView.centerXAnchor.constraint(equalTo: containerEffectView.contentView.centerXAnchor),
-            nippleContainerView.bottomAnchor.constraint(equalTo: containerEffectView.contentView.bottomAnchor, constant: -6),
+            nippleContainerView.centerYAnchor.constraint(equalTo: containerEffectView.contentView.centerYAnchor),
             nippleContainerView.widthAnchor.constraint(equalToConstant: nippleSize),
             nippleContainerView.heightAnchor.constraint(equalToConstant: nippleSize),
 
@@ -703,34 +705,34 @@ class KeyboardAccessoryView: UIView {
     // MARK: - Dismiss Gestures
 
     private func setupDismissGestures() {
-        // All keyboard show/hide gestures are on the drag handle only
+        // Keyboard show/hide gestures are on the top gesture zone
 
-        // Swipe down on drag handle = instant dismiss
+        // Swipe down = instant dismiss
         let swipeDown = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToDismiss))
         swipeDown.direction = .down
-        dragHandle.addGestureRecognizer(swipeDown)
+        dragGestureZoneView.addGestureRecognizer(swipeDown)
 
-        // Swipe up on drag handle = instant show keyboard
+        // Swipe up = instant show keyboard
         let swipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipeToShow))
         swipeUp.direction = .up
-        dragHandle.addGestureRecognizer(swipeUp)
+        dragGestureZoneView.addGestureRecognizer(swipeUp)
 
-        // Drag/pan on drag handle = interactive dismiss/show (like Find My)
+        // Drag/pan = interactive dismiss/show
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture))
         pan.delegate = self
-        dragHandle.addGestureRecognizer(pan)
+        dragGestureZoneView.addGestureRecognizer(pan)
 
-        // Tap on drag handle to toggle keyboard
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleDragHandleTap))
-        dragHandle.addGestureRecognizer(tap)
+        // Tap to toggle keyboard
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleGestureZoneTap))
+        dragGestureZoneView.addGestureRecognizer(tap)
     }
 
-    @objc private func handleDragHandleTap() {
+    @objc private func handleGestureZoneTap() {
         if isKeyboardShown {
-            Logger.clauntty.debugOnly("[AccessoryBar] drag handle tap to dismiss")
+            Logger.clauntty.debugOnly("[AccessoryBar] gesture zone tap to dismiss")
             onDismissKeyboard?()
         } else {
-            Logger.clauntty.debugOnly("[AccessoryBar] drag handle tap to show keyboard")
+            Logger.clauntty.debugOnly("[AccessoryBar] gesture zone tap to show keyboard")
             onShowKeyboard?()
         }
     }
@@ -1127,12 +1129,11 @@ class KeyboardAccessoryView: UIView {
         )
 
         if expandedFrame.contains(point) {
-            // Check drag handle first - it's at the top center of the container
-            let handleFrameInSelf = dragHandle.convert(dragHandle.bounds, to: self)
-            let expandedHandleFrame = handleFrameInSelf.insetBy(dx: -25, dy: -10)
-            if expandedHandleFrame.contains(point) {
-                Logger.clauntty.verbose("[AccessoryBar] hitTest: hit drag handle")
-                return dragHandle
+            // Check top gesture zone first
+            let gestureZoneFrameInSelf = dragGestureZoneView.convert(dragGestureZoneView.bounds, to: self)
+            if gestureZoneFrameInSelf.contains(point) {
+                Logger.clauntty.verbose("[AccessoryBar] hitTest: hit gesture zone")
+                return dragGestureZoneView
             }
 
             // Check expanded hit areas for Ctrl and Tab first (they need wider touch targets)
@@ -1204,7 +1205,7 @@ extension KeyboardAccessoryView: UIGestureRecognizerDelegate {
         // Only begin pan if it's primarily vertical (for keyboard show/hide)
         if let pan = gestureRecognizer as? UIPanGestureRecognizer {
             let velocity = pan.velocity(in: self)
-            // Allow both up and down vertical gestures on drag handle
+            // Allow both up and down vertical gestures on the top gesture zone
             return abs(velocity.y) > abs(velocity.x)
         }
         return true
@@ -1361,6 +1362,7 @@ class ArrowNippleView: UIView {
     }
 
     var onArrowInput: ((Direction) -> Void)?
+    var onDoubleTap: (() -> Void)?
 
     private let nipple = UIView()
     private var repeatTimer: Timer?
@@ -1415,6 +1417,17 @@ class ArrowNippleView: UIView {
         // Pan gesture for arrow input
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         addGestureRecognizer(panGesture)
+
+        // Double tap opens full session selector
+        let doubleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap))
+        doubleTapGesture.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTapGesture)
+
+        panGesture.require(toFail: doubleTapGesture)
+    }
+
+    @objc private func handleDoubleTap() {
+        onDoubleTap?()
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {

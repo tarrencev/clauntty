@@ -12,6 +12,13 @@ struct ContentView: View {
   @State private var hasCheckedAutoConnect = false
   @State private var showingSpeechModelDownload = false
 
+  private var shouldShowTopTabBar: Bool {
+    if case .web = sessionManager.activeTab {
+      return true
+    }
+    return false
+  }
+
   var body: some View {
     NavigationStack {
       if sessionManager.hasSessions {
@@ -19,15 +26,16 @@ struct ContentView: View {
         // Tab bar overlays terminal content with transparent background
         GeometryReader { geometry in
           ZStack(alignment: .top) {
-            // Terminal tabs (full screen, with top padding for tab bar)
+            // Terminal tabs (full screen, reaches top edge)
             ForEach(sessionManager.sessions) { session in
               let tab = SessionManager.ActiveTab.terminal(session.id)
               let isActive = sessionManager.activeTab == tab
 
-              TerminalView(session: session, isTabSelectorPresented: showingFullTabSelector)
-                .safeAreaInset(edge: .top) {
-                  Color.clear.frame(height: 48)  // Tab bar height
-                }
+              TerminalView(
+                session: session,
+                isTabSelectorPresented: showingFullTabSelector,
+                onShowSessionSelector: showFullTabSelector
+              )
                 .offset(x: isActive ? 0 : geometry.size.width)
                 .opacity(isActive ? 1 : 0)
                 .allowsHitTesting(isActive)
@@ -53,34 +61,23 @@ struct ContentView: View {
                 .animation(nil, value: sessionManager.activeTab)
             }
 
-            // Tab bar overlay at top
-            VStack(spacing: 0) {
-              LiquidGlassTabBarRepresentable(
-                onNewTab: { showingNewTabSheet = true },
-                onShowTabSelector: {
-                  Logger.clauntty.info("[TAB_SELECTOR] onShowTabSelector callback FIRED")
-                  // Force dismiss keyboard at window level (most aggressive)
-                  Logger.clauntty.info("[TAB_SELECTOR] Forcing keyboard dismiss via endEditing")
-                  UIApplication.shared.connectedScenes
-                    .compactMap { $0 as? UIWindowScene }
-                    .flatMap { $0.windows }
-                    .forEach { $0.endEditing(true) }
-
-                  // Also post notification to hide accessory bars
-                  NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
-
-                  showingFullTabSelector = true
-                },
-                onShowPorts: { session in
-                  Logger.clauntty.debugOnly(
-                    "ContentView: onShowPorts called for session \(session.id.uuidString.prefix(8))"
-                  )
-                  portsSheetSession = session
-                },
-                sessionStatesHash: sessionManager.sessionStateVersion
-              )
-              .frame(height: 48)
-              Spacer()
+            if shouldShowTopTabBar {
+              // Tab bar overlay at top (web tabs only)
+              VStack(spacing: 0) {
+                LiquidGlassTabBarRepresentable(
+                  onNewTab: { showingNewTabSheet = true },
+                  onShowTabSelector: showFullTabSelector,
+                  onShowPorts: { session in
+                    Logger.clauntty.debugOnly(
+                      "ContentView: onShowPorts called for session \(session.id.uuidString.prefix(8))"
+                    )
+                    portsSheetSession = session
+                  },
+                  sessionStatesHash: sessionManager.sessionStateVersion
+                )
+                .frame(height: 48)
+                Spacer()
+              }
             }
           }
         }
@@ -264,6 +261,18 @@ struct ContentView: View {
         Logger.clauntty.error("Auto-connect failed: \(error.localizedDescription)")
       }
     }
+  }
+
+  private func showFullTabSelector() {
+    Logger.clauntty.info("[TAB_SELECTOR] onShowTabSelector callback FIRED")
+    Logger.clauntty.info("[TAB_SELECTOR] Forcing keyboard dismiss via endEditing")
+    UIApplication.shared.connectedScenes
+      .compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }
+      .forEach { $0.endEditing(true) }
+
+    NotificationCenter.default.post(name: .hideAllAccessoryBars, object: nil)
+    showingFullTabSelector = true
   }
 
 }

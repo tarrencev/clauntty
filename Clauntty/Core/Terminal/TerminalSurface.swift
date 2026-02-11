@@ -60,6 +60,15 @@ struct TerminalSurface: UIViewRepresentable {
     /// Initial font size for this session (nil = use global default)
     var initialFontSize: Float?
 
+    /// Callback for left-edge swipe (switch to previous terminal session)
+    var onRequestPreviousSession: (() -> Void)?
+
+    /// Callback for right-edge swipe (switch to next terminal session)
+    var onRequestNextSession: (() -> Void)?
+
+    /// Callback for opening full sessions selector
+    var onRequestSessionSelector: (() -> Void)?
+
     /// Callback for keyboard input - send this data to SSH
     var onTextInput: ((Data) -> Void)?
 
@@ -87,6 +96,9 @@ struct TerminalSurface: UIViewRepresentable {
         view.onImagePaste = onImagePaste
         view.onTerminalSizeChanged = onTerminalSizeChanged
         view.onFontSizeChanged = onFontSizeChanged
+        view.onRequestPreviousSession = onRequestPreviousSession
+        view.onRequestNextSession = onRequestNextSession
+        view.onRequestSessionSelector = onRequestSessionSelector
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
 
         // Store in coordinator so we can call onSurfaceReady in updateUIView
@@ -103,6 +115,9 @@ struct TerminalSurface: UIViewRepresentable {
         uiView.onImagePaste = onImagePaste
         uiView.onTerminalSizeChanged = onTerminalSizeChanged
         uiView.onFontSizeChanged = onFontSizeChanged
+        uiView.onRequestPreviousSession = onRequestPreviousSession
+        uiView.onRequestNextSession = onRequestNextSession
+        uiView.onRequestSessionSelector = onRequestSessionSelector
 
         // Handle focus changes when active state changes
         uiView.setActive(isActive)
@@ -321,7 +336,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Full width spanning the window (minus safe area handled inside the view)
             accessoryBar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
             accessoryBar.trailingAnchor.constraint(equalTo: window.trailingAnchor),
-            accessoryBar.heightAnchor.constraint(equalToConstant: 74),  // topPadding(8) + barHeight(60) + bottomPadding(6)
+            accessoryBar.heightAnchor.constraint(equalToConstant: 60),  // topPadding(4) + barHeight(52) + bottomPadding(4)
             accessoryBarBottomConstraint!
         ])
         Logger.clauntty.debugOnly("[KB] Added accessory bar to window")
@@ -357,9 +372,18 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     /// Callback for image paste - upload image and paste path
     var onImagePaste: ((UIImage) -> Void)?
 
+    /// Callback to switch to previous terminal session (edge swipe)
+    var onRequestPreviousSession: (() -> Void)?
+
+    /// Callback to switch to next terminal session (edge swipe)
+    var onRequestNextSession: (() -> Void)?
+
+    /// Callback to open full sessions selector (joystick double tap)
+    var onRequestSessionSelector: (() -> Void)?
+
     /// Keyboard accessory bar with terminal keys
     private let accessoryBar: KeyboardAccessoryView = {
-        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 74))
+        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 60))
         return bar
     }()
 
@@ -398,6 +422,10 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         accessoryBar.onCancelRecording = {
             SpeechManager.shared.stopRecordingWithoutTranscription()
+        }
+
+        accessoryBar.onJoystickDoubleTap = { [weak self] in
+            self?.onRequestSessionSelector?()
         }
 
         // Update accessory bar with initial speech model state
@@ -667,11 +695,11 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Height to reserve for accessory bar when keyboard is visible (expanded bar)
     /// The bar is positioned above the keyboard but still within our view bounds
-    private let expandedAccessoryBarHeight: CGFloat = 74  // topPadding(8) + barHeight(60) + bottomPadding(6)
+    private let expandedAccessoryBarHeight: CGFloat = 60  // topPadding(4) + barHeight(52) + bottomPadding(4)
 
     /// Height to reserve for accessory bar when keyboard is hidden (collapsed bar)
     /// Includes safe area margin since bar is at bottom of screen
-    private let collapsedAccessoryBarHeight: CGFloat = 82  // 74pt bar + 8pt margin for safe area
+    private let collapsedAccessoryBarHeight: CGFloat = 68  // 60pt bar + 8pt margin for safe area
 
     private func updateSizeForKeyboard() {
         // Recalculate size accounting for accessory bar position
@@ -729,6 +757,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         scrollGesture.minimumNumberOfTouches = 1
         scrollGesture.maximumNumberOfTouches = 1
         addGestureRecognizer(scrollGesture)
+
+        // Edge swipe gestures to switch terminal sessions
+        let leftEdgeSwipe = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleLeftEdgeSwipe(_:)))
+        leftEdgeSwipe.edges = .left
+        addGestureRecognizer(leftEdgeSwipe)
+
+        let rightEdgeSwipe = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(handleRightEdgeSwipe(_:)))
+        rightEdgeSwipe.edges = .right
+        addGestureRecognizer(rightEdgeSwipe)
 
         // Add long press gesture for text selection
         let longPressGesture = UILongPressGestureRecognizer(target: self, action: #selector(handleLongPress(_:)))
@@ -1001,6 +1038,28 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let hasContent = UIPasteboard.general.hasStrings || UIPasteboard.general.hasImages
         if hasContent {
             showEditMenu(at: location)
+        }
+    }
+
+    @objc private func handleLeftEdgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        guard isActiveTab else { return }
+        guard gesture.state == .ended || gesture.state == .cancelled else { return }
+
+        let translation = gesture.translation(in: self)
+        let velocity = gesture.velocity(in: self)
+        if translation.x > 60 || velocity.x > 700 {
+            onRequestPreviousSession?()
+        }
+    }
+
+    @objc private func handleRightEdgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
+        guard isActiveTab else { return }
+        guard gesture.state == .ended || gesture.state == .cancelled else { return }
+
+        let translation = gesture.translation(in: self)
+        let velocity = gesture.velocity(in: self)
+        if translation.x < -60 || velocity.x < -700 {
+            onRequestNextSession?()
         }
     }
 

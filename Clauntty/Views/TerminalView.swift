@@ -19,6 +19,9 @@ struct TerminalView: View {
     /// Whether the full tab selector is currently presented
     var isTabSelectorPresented: Bool
 
+    /// Callback to open full tab/session selector
+    var onShowSessionSelector: () -> Void
+
     /// Reference to the terminal surface view for SSH data flow (wrapped in class for SwiftUI)
     @StateObject private var surfaceHolder = TerminalSurfaceHolder()
 
@@ -77,6 +80,13 @@ struct TerminalView: View {
                     sessionId: String(session.id.uuidString.prefix(8)),
                     isActive: isActive,
                     initialFontSize: session.fontSize,
+                    onRequestPreviousSession: {
+                        sessionManager.switchToPreviousTerminalSession()
+                    },
+                    onRequestNextSession: {
+                        sessionManager.switchToNextTerminalSession()
+                    },
+                    onRequestSessionSelector: onShowSessionSelector,
                     onTextInput: { data in
                         // Send keyboard input to SSH via session
                         Logger.clauntty.verbose("[INPUT] onTextInput called with \(data.count) bytes: \(data.map { String(format: "%02x", $0) }.joined(separator: " "))")
@@ -364,7 +374,7 @@ struct TerminalView: View {
     let session = Session(connectionConfig: config)
 
     return NavigationStack {
-        TerminalView(session: session, isTabSelectorPresented: false)
+        TerminalView(session: session, isTabSelectorPresented: false, onShowSessionSelector: {})
             .environmentObject(GhosttyApp())
             .environmentObject(SessionManager())
             .environmentObject(AppState())
