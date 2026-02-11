@@ -27,3 +27,7 @@ screenshots/
 
 # IDB temp files
 /tmp/idb_companion.log
+
+# Local dependency checkouts (not tracked in this repo)
+ghostty/
+rtach/

@@ -16,7 +16,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUNDLE_ID="com.octerm.clauntty"
 SCREENSHOTS_DIR="$PROJECT_DIR/screenshots"
-DEVICE_NAME="iPhone 17"
+DEVICE_NAME="${DEVICE_NAME:-iPhone 16}"
 
 # Colors
 GREEN='\033[0;32m'
