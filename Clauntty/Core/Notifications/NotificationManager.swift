@@ -8,6 +8,17 @@ enum NotificationMode: String, CaseIterable, Codable {
     case none = "None"
     case claudeOnly = "Claude only"
     case allTerminals = "All terminals"
+
+    var displayName: String {
+        switch self {
+        case .none:
+            return "None"
+        case .claudeOnly:
+            return "Agents only (Claude/Codex)"
+        case .allTerminals:
+            return "All terminals"
+        }
+    }
 }
 
 /// Manages iOS notifications for terminal input readiness
@@ -34,6 +45,8 @@ class NotificationManager: NSObject, ObservableObject {
 
     /// Session to switch to when app becomes active (set by notification tap)
     var pendingSessionSwitch: UUID?
+    /// Optional tmux target requested by notification payload.
+    var pendingTmuxTarget: String?
 
     /// Background task identifier for continuing SSH processing
     private var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
@@ -105,9 +118,10 @@ class NotificationManager: NSObject, ObservableObject {
 
     // MARK: - Notification Scheduling
 
-    /// Check if a notification should be sent for this session
-    func shouldNotify(for session: Session) -> Bool {
-        Logger.clauntty.debugOnly("NotificationManager.shouldNotify: backgrounded=\(self.appIsBackgrounded), authorized=\(self.isAuthorized), mode=\(self.notificationMode.rawValue), isClaudeSession=\(session.isClaudeSession)")
+    /// Check if a notification should be sent for this session.
+    /// - Parameter isExplicitRequest: true when a remote tool explicitly requests a notification.
+    func shouldNotify(for session: Session, isExplicitRequest: Bool = false) -> Bool {
+        Logger.clauntty.debugOnly("NotificationManager.shouldNotify: backgrounded=\(self.appIsBackgrounded), authorized=\(self.isAuthorized), mode=\(self.notificationMode.rawValue), isAgentSession=\(session.isAgentSession), explicit=\(isExplicitRequest)")
 
         // Must be backgrounded
         guard appIsBackgrounded else {
@@ -127,8 +141,8 @@ class NotificationManager: NSObject, ObservableObject {
             Logger.clauntty.debugOnly("NotificationManager: mode is none, skipping notification")
             return false
         case .claudeOnly:
-            let should = session.isClaudeSession
-            Logger.clauntty.debugOnly("NotificationManager: claudeOnly mode, isClaudeSession=\(should)")
+            let should = isExplicitRequest || session.isAgentSession
+            Logger.clauntty.debugOnly("NotificationManager: claudeOnly mode, explicit=\(isExplicitRequest), isAgentSession=\(session.isAgentSession), should=\(should)")
             return should
         case .allTerminals:
             Logger.clauntty.debugOnly("NotificationManager: allTerminals mode, sending notification")
@@ -165,6 +179,40 @@ class NotificationManager: NSObject, ObservableObject {
         } catch {
             pendingSessionIds.remove(session.id)
             Logger.clauntty.error("NotificationManager: failed to schedule notification: \(error.localizedDescription)")
+        }
+    }
+
+    /// Schedule a notification requested explicitly by a remote tool (for example Codex notify hook).
+    func scheduleRemoteNotify(session: Session, message: String, tmuxTarget: String?) async {
+        guard shouldNotify(for: session, isExplicitRequest: true) else {
+            Logger.clauntty.debugOnly("NotificationManager: skipping remote notify (filters)")
+            return
+        }
+
+        let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = trimmed.isEmpty ? "\(session.title) needs attention" : trimmed
+
+        let content = UNMutableNotificationContent()
+        content.title = "Agent needs input"
+        content.body = body
+        content.sound = .default
+        var userInfo: [String: Any] = ["sessionId": session.id.uuidString]
+        if let target = tmuxTarget?.trimmingCharacters(in: .whitespacesAndNewlines), !target.isEmpty {
+            userInfo["tmuxTarget"] = target
+        }
+        content.userInfo = userInfo
+
+        let request = UNNotificationRequest(
+            identifier: "remote-notify-\(session.id.uuidString)-\(Int(Date().timeIntervalSince1970))",
+            content: content,
+            trigger: nil
+        )
+
+        do {
+            try await notificationCenter.add(request)
+            Logger.clauntty.debugOnly("NotificationManager: scheduled remote notify for \(session.title)")
+        } catch {
+            Logger.clauntty.error("NotificationManager: failed to schedule remote notify: \(error.localizedDescription)")
         }
     }
 
@@ -253,6 +301,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
+        let tmuxTarget = userInfo["tmuxTarget"] as? String
 
         // Extract session ID synchronously
         guard let sessionIdString = userInfo["sessionId"] as? String,
@@ -265,6 +314,7 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             Task { @MainActor in
                 self.pendingSessionSwitch = sessionId
+                self.pendingTmuxTarget = tmuxTarget
                 self.pendingSessionIds.remove(sessionId)
                 Logger.clauntty.debugOnly("NotificationManager: stored pending session switch to \(sessionId.uuidString.prefix(8))")
             }
@@ -276,13 +326,15 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
     /// Process pending session switch (call when app becomes active)
     func processPendingSessionSwitch() {
         guard let sessionId = pendingSessionSwitch else { return }
+        let tmuxTarget = pendingTmuxTarget
         pendingSessionSwitch = nil
+        pendingTmuxTarget = nil
 
         Logger.clauntty.debugOnly("NotificationManager: processing pending switch to session \(sessionId.uuidString.prefix(8))")
         NotificationCenter.default.post(
             name: .switchToSession,
             object: nil,
-            userInfo: ["sessionId": sessionId]
+            userInfo: ["sessionId": sessionId, "tmuxTarget": tmuxTarget as Any]
         )
     }
 }

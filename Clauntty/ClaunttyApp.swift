@@ -255,14 +255,10 @@ struct AppContentView: View {
 
     private func handleSwitchToSession(_ notification: Notification) {
         guard let sessionId = notification.userInfo?["sessionId"] as? UUID else { return }
+        let tmuxTarget = notification.userInfo?["tmuxTarget"] as? String
 
-        // Find and switch to the session
-        if let session = sessionManager.sessions.first(where: { $0.id == sessionId }) {
-            sessionManager.switchTo(session)
-            Logger.clauntty.debugOnly("Switched to session from notification: \(sessionId.uuidString.prefix(8))")
-        } else {
-            Logger.clauntty.warning("Session not found for notification: \(sessionId.uuidString.prefix(8))")
-        }
+        sessionManager.navigateFromNotification(sessionId: sessionId, tmuxTarget: tmuxTarget)
+        Logger.clauntty.debugOnly("Switched to session from notification: \(sessionId.uuidString.prefix(8)), tmuxTarget=\(tmuxTarget ?? "none")")
     }
 }
 

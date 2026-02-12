@@ -82,6 +82,10 @@ class Session: ObservableObject, Identifiable {
                 if title.contains("\u{2733}") {
                     markAsClaudeSession()
                 }
+                // If this is a Codex session, remember that permanently
+                if Self.isCodexTitle(title) {
+                    markAsCodexSession()
+                }
             }
 
             // Check for pending notification when title is set
@@ -91,6 +95,8 @@ class Session: ObservableObject, Identifiable {
 
     /// Whether this session has ever been identified as Claude (persisted)
     private var _isClaudeSession: Bool = false
+    /// Whether this session has ever been identified as Codex (persisted)
+    private var _isCodexSession: Bool = false
 
     /// Display title for tab - prefer dynamic title if set
     var title: String {
@@ -118,6 +124,19 @@ class Session: ObservableObject, Identifiable {
         return _isClaudeSession
     }
 
+    /// Whether this appears to be a Codex session (detected by title matching "codex")
+    var isCodexSession: Bool {
+        if let title = dynamicTitle {
+            return Self.isCodexTitle(title)
+        }
+        return _isCodexSession
+    }
+
+    /// Whether this appears to be an AI coding agent session (Claude or Codex)
+    var isAgentSession: Bool {
+        isClaudeSession || isCodexSession
+    }
+
     /// Whether we have a pending notification waiting for title to be set
     private var pendingNotificationCheck: Bool = false
 
@@ -141,9 +160,43 @@ class Session: ObservableObject, Identifiable {
         }
     }
 
+    /// Mark this session as a Codex session (persisted)
+    private func markAsCodexSession() {
+        guard !_isCodexSession else { return }
+        _isCodexSession = true
+        if let sessionId = rtachSessionId {
+            let key = Self.codexSessionKey(connectionId: connectionConfig.id, rtachSessionId: sessionId)
+            UserDefaults.standard.set(true, forKey: key)
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): marked as Codex session")
+        }
+    }
+
+    /// Restore Codex session flag from UserDefaults
+    private func restoreCodexSessionFlag(rtachSessionId: String) {
+        let key = Self.codexSessionKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId)
+        _isCodexSession = UserDefaults.standard.bool(forKey: key)
+        if _isCodexSession {
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): restored Codex session flag")
+        }
+    }
+
     /// Storage key for Claude session flag
     private static func claudeSessionKey(connectionId: UUID, rtachSessionId: String) -> String {
         return "session_claude_\(connectionId.uuidString)_\(rtachSessionId)"
+    }
+
+    /// Storage key for Codex session flag
+    private static func codexSessionKey(connectionId: UUID, rtachSessionId: String) -> String {
+        return "session_codex_\(connectionId.uuidString)_\(rtachSessionId)"
+    }
+
+    /// Detect codex word in title with non-alphanumeric boundaries.
+    private static func isCodexTitle(_ title: String) -> Bool {
+        let normalized = title.lowercased().unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }
+        let words = String(normalized).split(separator: " ")
+        return words.contains(where: { $0 == "codex" })
     }
 
     /// Check if we should send a notification (called when title is set)
@@ -153,7 +206,7 @@ class Session: ObservableObject, Identifiable {
         guard pendingNotificationCheck else { return }
 
         pendingNotificationCheck = false
-        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking pending notification, isClaudeSession=\(self.isClaudeSession)")
+        Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking pending notification, isAgentSession=\(self.isAgentSession)")
 
         if NotificationManager.shared.shouldNotify(for: self) {
             Task {
@@ -242,8 +295,9 @@ class Session: ObservableObject, Identifiable {
 
     /// Restore saved title for a resumed session
     private func restoreSavedTitle(rtachSessionId: String) {
-        // Restore Claude session flag first
+        // Restore AI session flags first
         restoreClaudeSessionFlag(rtachSessionId: rtachSessionId)
+        restoreCodexSessionFlag(rtachSessionId: rtachSessionId)
 
         // Restore title
         let key = Self.titleStorageKey(connectionId: connectionConfig.id, rtachSessionId: rtachSessionId)
@@ -286,6 +340,9 @@ class Session: ObservableObject, Identifiable {
 
     /// Called when a URL should be opened in the device browser
     var onOpenBrowserRequested: ((String) -> Void)?
+
+    /// Called when a remote tool requests a local iOS notification
+    var onNotifyRequested: ((String, String?) -> Void)?
 
     // MARK: - rtach Protocol Session
 
@@ -529,7 +586,7 @@ class Session: ObservableObject, Identifiable {
     /// Handle a command received from rtach via command pipe
     /// Format: "command;arg1;arg2..."
     private func handleRtachCommand(_ command: String) {
-        let parts = command.split(separator: ";", maxSplits: 1)
+        let parts = command.split(separator: ";", maxSplits: 2, omittingEmptySubsequences: false)
         guard let cmd = parts.first else { return }
 
         switch cmd {
@@ -548,6 +605,13 @@ class Session: ObservableObject, Identifiable {
                 let urlString = String(parts[1])
                 Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command browser \(urlString)")
                 onOpenBrowserRequested?(urlString)
+            }
+        case "notify":
+            if parts.count > 1 {
+                let message = String(parts[1])
+                let tmuxTarget = parts.count > 2 ? String(parts[2]) : nil
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): rtach command notify")
+                onNotifyRequested?(message, tmuxTarget)
             }
         default:
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): unknown rtach command: \(cmd)")
@@ -591,8 +655,8 @@ class Session: ObservableObject, Identifiable {
     /// Check if we should send a notification when waiting for input
     private func checkNotificationForWaitingInput() {
         // If we have title info, check notification immediately
-        if dynamicTitle != nil || _isClaudeSession {
-            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking notification, isClaudeSession=\(self.isClaudeSession)")
+        if dynamicTitle != nil || _isClaudeSession || _isCodexSession {
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): checking notification, isAgentSession=\(self.isAgentSession)")
             if NotificationManager.shared.shouldNotify(for: self) {
                 Task {
                     await NotificationManager.shared.scheduleInputReady(session: self)

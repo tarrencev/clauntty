@@ -34,3 +34,5 @@ rtach/
 
 # Local deploy config
 .deploy-device.local
+
+libxev

@@ -33,6 +33,14 @@ enum FontSizePreference {
     }
 }
 
+enum CursorTapPreference {
+    static let userDefaultsKey = "tapToMoveCursorEnabled"
+
+    static var isEnabled: Bool {
+        UserDefaults.standard.object(forKey: userDefaultsKey) as? Bool ?? true
+    }
+}
+
 // MARK: - Notifications
 
 extension Notification.Name {
@@ -336,7 +344,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             // Full width spanning the window (minus safe area handled inside the view)
             accessoryBar.leadingAnchor.constraint(equalTo: window.leadingAnchor),
             accessoryBar.trailingAnchor.constraint(equalTo: window.trailingAnchor),
-            accessoryBar.heightAnchor.constraint(equalToConstant: 60),  // topPadding(4) + barHeight(52) + bottomPadding(4)
+            accessoryBar.heightAnchor.constraint(equalToConstant: 52),
             accessoryBarBottomConstraint!
         ])
         Logger.clauntty.debugOnly("[KB] Added accessory bar to window")
@@ -348,7 +356,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         let bottomOffset: CGFloat
         if keyboardVisible && keyboardHeight > 0 {
             // Above keyboard (keyboard height from bottom of window)
-            bottomOffset = -keyboardHeight
+            bottomOffset = -keyboardHeight - keyboardBarBottomGap
         } else {
             // At bottom of screen (above safe area)
             let safeBottom = window?.safeAreaInsets.bottom ?? 0
@@ -383,7 +391,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Keyboard accessory bar with terminal keys
     private let accessoryBar: KeyboardAccessoryView = {
-        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 60))
+        let bar = KeyboardAccessoryView(frame: CGRect(x: 0, y: 0, width: 0, height: 52))
         return bar
     }()
 
@@ -695,11 +703,28 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     /// Height to reserve for accessory bar when keyboard is visible (expanded bar)
     /// The bar is positioned above the keyboard but still within our view bounds
-    private let expandedAccessoryBarHeight: CGFloat = 60  // topPadding(4) + barHeight(52) + bottomPadding(4)
+    private let expandedAccessoryBarHeight: CGFloat = 52
 
     /// Height to reserve for accessory bar when keyboard is hidden (collapsed bar)
     /// Includes safe area margin since bar is at bottom of screen
-    private let collapsedAccessoryBarHeight: CGFloat = 68  // 60pt bar + 8pt margin for safe area
+    private let collapsedAccessoryBarHeight: CGFloat = 60  // 52pt bar + 8pt margin for safe area
+    private let keyboardBarBottomGap: CGFloat = 4
+
+    /// Reserve exactly the amount of vertical space occupied by the accessory bar inside
+    /// this view. Falls back to fixed constants if geometry isn't available yet.
+    private func currentAccessoryBarReserve() -> CGFloat {
+        guard let barSuperview = accessoryBar.superview else {
+            return keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        }
+
+        let barFrameInSelf = convert(accessoryBar.frame, from: barSuperview)
+        let overlap = bounds.maxY - barFrameInSelf.minY
+        if overlap > 0 {
+            return min(overlap, bounds.height)
+        }
+
+        return keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+    }
 
     private func updateSizeForKeyboard() {
         // Recalculate size accounting for accessory bar position
@@ -717,7 +742,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         //   - Our bounds are nearly full screen
         //   - The accessory bar is at the bottom of screen, within our bounds
         //   - Reserve space for the collapsed bar (includes safe area margin)
-        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        let accessoryBarReserve = currentAccessoryBarReserve()
         let effectiveSize = CGSize(
             width: bounds.width,
             height: bounds.height - accessoryBarReserve
@@ -1012,7 +1037,20 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             return
         }
 
-        // If TUI app has mouse tracking enabled, send left-click to app
+        // Become first responder to show keyboard
+        if !isFirstResponder {
+            _ = becomeFirstResponder()
+        }
+
+        // Best-effort cursor positioning for shell/readline-style prompts:
+        // replay left/right arrows based on tapped X position only.
+        // We intentionally avoid vertical moves because up/down often map to history/TUI actions.
+        if CursorTapPreference.isEnabled && moveCursorHorizontallyTowardTap(location) {
+            return
+        }
+
+        // If TUI app has mouse tracking enabled, send left-click to app.
+        // This is a fallback when tap-to-move didn't produce a cursor delta.
         let captured = isMouseCaptured
         Logger.clauntty.verbose("[MOUSE] handleTap: isMouseCaptured=\(captured), location=(\(Int(location.x)), \(Int(location.y)))")
 
@@ -1022,16 +1060,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
             ghostty_surface_mouse_pos(surface, Double(location.x), Double(location.y), GHOSTTY_MODS_NONE)
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_PRESS, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
             _ = ghostty_surface_mouse_button(surface, GHOSTTY_MOUSE_RELEASE, GHOSTTY_MOUSE_LEFT, GHOSTTY_MODS_NONE)
-            // Ensure keyboard is shown for TUI input
-            if !isFirstResponder {
-                _ = becomeFirstResponder()
-            }
             return
-        }
-
-        // Become first responder to show keyboard
-        if !isFirstResponder {
-            _ = becomeFirstResponder()
         }
 
         // Show paste menu if clipboard has content (tap anywhere to paste)
@@ -1039,6 +1068,71 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         if hasContent {
             showEditMenu(at: location)
         }
+    }
+
+    /// Move cursor horizontally toward tap location by replaying arrow keys.
+    /// This is intentionally X-axis only so taps never synthesize up/down history movement.
+    /// Returns true if cursor movement was sent.
+    private func moveCursorHorizontallyTowardTap(_ location: CGPoint) -> Bool {
+        guard let surface = self.surface else { return false }
+
+        var cursorX: Double = 0
+        var cursorY: Double = 0
+        var cellW: Double = 0
+        var cellH: Double = 0
+        ghostty_surface_ime_point(surface, &cursorX, &cursorY, &cellW, &cellH)
+
+        guard cellW > 0.0, cellH > 0.0 else {
+            // Fallback for TUI states where IME metrics aren't available (observed in Codex-like
+            // fullscreen UIs). Use a coarse left/right movement based on screen halves.
+            let deltaX = location.x - bounds.midX
+            let deadZone: CGFloat = 20
+            guard abs(deltaX) > deadZone else { return false }
+
+            let stepSize: CGFloat = 28
+            let steps = min(max(Int(abs(deltaX) / stepSize), 1), 8)
+            let arrow = deltaX > 0 ? "\u{001B}[C" : "\u{001B}[D"
+            let payload = String(repeating: arrow, count: steps)
+            if let data = payload.data(using: .utf8) {
+                onTextInput?(data)
+                Logger.clauntty.debugOnly("[CURSOR] fallback tap-to-move sent \(steps) \(deltaX > 0 ? "right" : "left") steps")
+                return true
+            }
+            return false
+        }
+
+        let cursorMidX = CGFloat(cursorX + (cellW / 2.0))
+        let deltaCols = Int(round((location.x - cursorMidX) / CGFloat(cellW)))
+        guard deltaCols != 0 else { return false }
+
+        // Guard against unreliable IME metrics that can cause huge jumps to column 0.
+        if abs(deltaCols) > 40 {
+            let deltaX = location.x - bounds.midX
+            let deadZone: CGFloat = 20
+            guard abs(deltaX) > deadZone else { return false }
+            let stepSize: CGFloat = 28
+            let steps = min(max(Int(abs(deltaX) / stepSize), 1), 8)
+            let arrow = deltaX > 0 ? "\u{001B}[C" : "\u{001B}[D"
+            if let data = String(repeating: arrow, count: steps).data(using: .utf8) {
+                onTextInput?(data)
+                Logger.clauntty.debugOnly("[CURSOR] guardrail fallback sent \(steps) \(deltaX > 0 ? "right" : "left") steps")
+                return true
+            }
+            return false
+        }
+
+        // Cap movement to avoid huge bursts from accidental far taps.
+        let maxSteps = 24
+        let steps = min(abs(deltaCols), maxSteps)
+        let arrow = deltaCols > 0 ? "\u{001B}[C" : "\u{001B}[D"
+        let payload = String(repeating: arrow, count: steps)
+
+        if let data = payload.data(using: .utf8) {
+            onTextInput?(data)
+            Logger.clauntty.debugOnly("[CURSOR] tap-to-move sent \(steps) \(deltaCols > 0 ? "right" : "left") steps")
+            return true
+        }
+        return false
     }
 
     @objc private func handleLeftEdgeSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
@@ -1585,7 +1679,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         // Immediately trigger size update with current bounds
         // This ensures the sublayer gets the correct size even if layoutSubviews hasn't run yet
         // Always reserve space - different amounts for expanded vs collapsed bar
-        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        let accessoryBarReserve = currentAccessoryBarReserve()
         let effectiveSize = CGSize(
             width: bounds.width,
             height: bounds.height - accessoryBarReserve
@@ -1612,7 +1706,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         // Account for accessory bar when calculating effective size
         // Always reserve space - different amounts for expanded vs collapsed bar
-        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        let accessoryBarReserve = currentAccessoryBarReserve()
         let effectiveSize = CGSize(
             width: bounds.width,
             height: bounds.height - accessoryBarReserve
@@ -1696,7 +1790,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             // Account for accessory bar when calculating effective size
             // Always reserve space - different amounts for expanded vs collapsed bar
-            let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+            let accessoryBarReserve = currentAccessoryBarReserve()
             let effectiveSize = CGSize(
                 width: bounds.width,
                 height: bounds.height - accessoryBarReserve
@@ -1792,7 +1886,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
         let scale = window?.screen.scale ?? UIScreen.main.scale
         // Always reserve space for accessory bar - different amounts for expanded vs collapsed
-        let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+        let accessoryBarReserve = currentAccessoryBarReserve()
         let effectiveHeight = bounds.height - accessoryBarReserve
         let w = UInt32(bounds.width * scale)
         let h = UInt32(effectiveHeight * scale)
@@ -1877,7 +1971,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
             // Force size update to ensure Metal layer frame is correct after tab switch
             // Always reserve space - different amounts for expanded vs collapsed bar
-            let accessoryBarReserve: CGFloat = keyboardHeight > 0 ? expandedAccessoryBarHeight : collapsedAccessoryBarHeight
+            let accessoryBarReserve = currentAccessoryBarReserve()
             let effectiveSize = CGSize(
                 width: bounds.width,
                 height: bounds.height - accessoryBarReserve
@@ -2131,6 +2225,15 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
     func insertText(_ text: String) {
         Logger.clauntty.verbose("insertText called: '\(text)' (\(text.count) chars)")
 
+        // Check if Fn modifier is active from accessory bar (one-shot).
+        if accessoryBar.consumeFnModifier() {
+            if let mapped = accessoryBar.mappedFnData(for: text) {
+                onTextInput?(mapped)
+                Logger.clauntty.debugOnly("Fn+\(text) mapped to function sequence")
+                return
+            }
+        }
+
         // Check if Ctrl modifier is active from accessory bar
         if accessoryBar.consumeCtrlModifier() {
             // Convert character to control character (Ctrl+A = 0x01, Ctrl+C = 0x03, etc.)
@@ -2169,9 +2272,7 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
 
     func deleteBackward() {
         Logger.clauntty.verbose("deleteBackward called")
-        // Send backspace (ASCII DEL 0x7F or BS 0x08) to SSH
-        let backspace = Data([0x7F])  // DEL character
-        onTextInput?(backspace)
+        onTextInput?(Data([0x7F]))
     }
 
     // MARK: - Hardware Keyboard Support
@@ -2193,8 +2294,44 @@ class TerminalSurfaceView: UIView, ObservableObject, UIKeyInput, UITextInputTrai
         }
     }
 
+    override func pressesChanged(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        var handled = false
+
+        for press in presses {
+            guard let key = press.key else { continue }
+            if key.keyCode == .keyboardDeleteOrBackspace {
+                onTextInput?(Data([0x7F]))
+                handled = true
+            }
+        }
+
+        if !handled {
+            super.pressesChanged(presses, with: event)
+        }
+    }
+
     /// Convert UIKey to terminal escape sequence data
     private func dataForKey(_ key: UIKey) -> Data? {
+        if accessoryBar.consumeFnModifier() {
+            let chars = key.characters
+            if let first = chars.first, let mapped = KeyboardAccessoryView.fnMappedData(for: first) {
+                return mapped
+            }
+
+            switch key.keyCode {
+            case .keyboardUpArrow:
+                return Data([0x1B, 0x5B, 0x35, 0x7E])  // PgUp
+            case .keyboardDownArrow:
+                return Data([0x1B, 0x5B, 0x36, 0x7E])  // PgDn
+            case .keyboardLeftArrow:
+                return Data([0x1B, 0x5B, 0x48])  // Home
+            case .keyboardRightArrow:
+                return Data([0x1B, 0x5B, 0x46])  // End
+            default:
+                break
+            }
+        }
+
         switch key.keyCode {
         // Escape key
         case .keyboardEscape:

@@ -46,6 +46,7 @@ class RtachDeployer {
     static let remoteSessionsPath = "~/.clauntty/sessions"
     static let remoteMetadataPath = "~/.clauntty/sessions.json"
     static let claudeSettingsPath = "~/.claude/settings.json"
+    static let codexConfigPath = "~/.codex/config.toml"
 
     /// Expected rtach version - must match rtach's version constant
     /// Increment this when rtach is updated to force redeployment
@@ -267,6 +268,10 @@ class RtachDeployer {
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: deploying Claude Code hook...")
         try await deployClaudeHook()
 
+        // Enable Codex native notifications (works in remote/tmux sessions)
+        Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: configuring Codex native notifications...")
+        try await configureCodexNotifications()
+
         // Clean up old unused binaries
         Logger.clauntty.debugOnly("RtachDeployer.ensureDeployed: cleaning up old binaries...")
         await cleanupOldBinaries()
@@ -408,7 +413,35 @@ class RtachDeployer {
             "chmod +x ~/.clauntty/bin/open-browser"
         )
 
-        Logger.clauntty.debugOnly("Helper scripts deployed (forward-port, open-tab, open-browser)")
+        // Deploy notify-phone script (bridges remote Codex notify to iOS local notification)
+        _ = try await connection.executeCommand(
+            "cat > ~/.clauntty/bin/notify-phone << 'EOF'\n" +
+            "#!/bin/bash\n" +
+            "msg=\"$*\"\n" +
+            "if [ -z \"$msg\" ]; then\n" +
+            "  msg=\"Codex needs input\"\n" +
+            "fi\n" +
+            "msg=\"${msg//$'\\n'/ }\"\n" +
+            "msg=\"${msg//;/,}\"\n" +
+            "tmux_target=\"\"\n" +
+            "if [ -n \"$TMUX\" ] && command -v tmux >/dev/null 2>&1; then\n" +
+            "  tmux_target=$(tmux display-message -p '#S:#I.#P' 2>/dev/null || true)\n" +
+            "fi\n" +
+            "tmux_target=\"${tmux_target//$'\\n'/ }\"\n" +
+            "tmux_target=\"${tmux_target//;/}\"\n" +
+            "if [ -z \"$RTACH_CMD_PIPE\" ]; then\n" +
+            "  echo \"Error: RTACH_CMD_PIPE not set (not running in rtach session)\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "if ! printf 'notify;%s;%s\\n' \"$msg\" \"$tmux_target\" > \"$RTACH_CMD_PIPE\" 2>/dev/null; then\n" +
+            "  echo \"Error: Failed to write to RTACH_CMD_PIPE\" >&2\n" +
+            "  exit 1\n" +
+            "fi\n" +
+            "EOF\n" +
+            "chmod +x ~/.clauntty/bin/notify-phone"
+        )
+
+        Logger.clauntty.debugOnly("Helper scripts deployed (forward-port, open-tab, open-browser, notify-phone)")
     }
 
     // MARK: - Claude Code Settings
@@ -436,7 +469,8 @@ class RtachDeployer {
         let requiredPerms = [
             "Bash(~/.clauntty/bin/forward-port:*)",
             "Bash(~/.clauntty/bin/open-tab:*)",
-            "Bash(~/.clauntty/bin/open-browser:*)"
+            "Bash(~/.clauntty/bin/open-browser:*)",
+            "Bash(~/.clauntty/bin/notify-phone:*)"
         ]
         for perm in requiredPerms {
             if !allow.contains(perm) {
@@ -468,7 +502,8 @@ class RtachDeployer {
                     "allow": [
                         "Bash(~/.clauntty/bin/forward-port:*)",
                         "Bash(~/.clauntty/bin/open-tab:*)",
-                        "Bash(~/.clauntty/bin/open-browser:*)"
+                        "Bash(~/.clauntty/bin/open-browser:*)",
+                        "Bash(~/.clauntty/bin/notify-phone:*)"
                     ]
                 ]
             ]
@@ -486,6 +521,62 @@ class RtachDeployer {
             "cat > \(Self.claudeSettingsPath)",
             stdinData: data
         )
+    }
+
+    // MARK: - Codex Settings
+
+    /// Configure Codex native notifications in ~/.codex/config.toml.
+    /// Uses bell notifications for broad compatibility in SSH/tmux.
+    private func configureCodexNotifications() async throws {
+        let script =
+            "mkdir -p ~/.codex\n" +
+            "cfg=\(Self.codexConfigPath)\n" +
+            "touch \"$cfg\"\n" +
+            // Force global notify hook at file top.
+            // This avoids accidentally placing `notify` inside [tui] (or any other table).
+            "tmp_notify=$(mktemp)\n" +
+            "awk 'BEGIN {\n" +
+            "  print \"notify = [\\\"bash\\\", \\\"-lc\\\", \\\"~/.clauntty/bin/notify-phone \\\\\\\"$1\\\\\\\"\\\", \\\"--\\\"]\"\n" +
+            "} {\n" +
+            "  if ($0 ~ /^[[:space:]]*notify[[:space:]]*=/) next\n" +
+            "  print\n" +
+            "}' \"$cfg\" > \"$tmp_notify\" && mv \"$tmp_notify\" \"$cfg\"\n" +
+            // Ensure [tui] notification settings
+            "tmp=$(mktemp)\n" +
+            "awk '\n" +
+            "BEGIN { in_tui=0; saw_tui=0; set_n=0; set_m=0 }\n" +
+            "{\n" +
+                "  if ($0 ~ /^[[:space:]]*\\[/) {\n" +
+            "    if (in_tui) {\n" +
+            "      if (!set_n) print \"notifications = true\"\n" +
+            "      if (!set_m) print \"notification_method = \\\"bel\\\"\"\n" +
+            "      in_tui=0\n" +
+            "    }\n" +
+            "    if ($0 ~ /^[[:space:]]*\\[tui\\][[:space:]]*$/) { in_tui=1; saw_tui=1; print; next }\n" +
+            "  }\n" +
+            "  if (in_tui && $0 ~ /^[[:space:]]*notifications[[:space:]]*=/) { print \"notifications = true\"; set_n=1; next }\n" +
+            "  if (in_tui && $0 ~ /^[[:space:]]*notification_method[[:space:]]*=/) { print \"notification_method = \\\"bel\\\"\"; set_m=1; next }\n" +
+            "  if ($0 ~ /^[[:space:]]*tui\\.notifications[[:space:]]*=/) { print \"tui.notifications = true\"; set_n=1; next }\n" +
+            "  if ($0 ~ /^[[:space:]]*tui\\.notification_method[[:space:]]*=/) { print \"tui.notification_method = \\\"bel\\\"\"; set_m=1; next }\n" +
+            "  print\n" +
+            "}\n" +
+            "END {\n" +
+            "  if (in_tui) {\n" +
+            "    if (!set_n) print \"notifications = true\"\n" +
+            "    if (!set_m) print \"notification_method = \\\"bel\\\"\"\n" +
+            "  } else if (saw_tui) {\n" +
+            "    if (!set_n) print \"tui.notifications = true\"\n" +
+            "    if (!set_m) print \"tui.notification_method = \\\"bel\\\"\"\n" +
+            "  } else {\n" +
+            "    print \"\"\n" +
+            "    print \"[tui]\"\n" +
+            "    print \"notifications = true\"\n" +
+            "    print \"notification_method = \\\"bel\\\"\"\n" +
+            "  }\n" +
+            "}\n" +
+            "' \"$cfg\" > \"$tmp\" && mv \"$tmp\" \"$cfg\""
+
+        _ = try await connection.executeCommand(script)
     }
 
     // MARK: - Session Metadata

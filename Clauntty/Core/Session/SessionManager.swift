@@ -81,6 +81,9 @@ class SessionManager: ObservableObject {
     /// Minimum time between reconnect attempts (prevents rapid crash loops)
     private let reconnectBackoff: TimeInterval = 2.0
 
+    /// Pending tmux target to focus after navigating to a session from notification tap.
+    private var pendingTmuxFocusTargets: [UUID: String] = [:]
+
     // MARK: - Session Management
 
     /// Create a new session for a connection config
@@ -261,6 +264,10 @@ class SessionManager: ObservableObject {
             guard let self = self else { return }
             self.handleOpenBrowserRequest(urlString: urlString)
         }
+        session.onNotifyRequested = { [weak self, weak session] message, tmuxTarget in
+            guard let self = self, let session = session else { return }
+            self.handleRemoteNotifyRequest(from: session, message: message, tmuxTarget: tmuxTarget)
+        }
 
         // Wire up auto-reconnect callback for when send detects nil channel
         session.onNeedsReconnect = { [weak self, weak session] in
@@ -285,6 +292,9 @@ class SessionManager: ObservableObject {
 
         // Request notification permission on first session connect
         await NotificationManager.shared.requestAuthorizationIfNeeded()
+
+        // If notification tap requested tmux focus for this session while reconnecting, apply it now.
+        performPendingTmuxFocusIfNeeded(for: session)
     }
 
     /// Reconnect a disconnected session
@@ -927,6 +937,45 @@ class SessionManager: ObservableObject {
             await UIApplication.shared.open(url)
             Logger.clauntty.debugOnly("Opened browser URL: \(urlString)")
         }
+    }
+
+    /// Handle a local notification request from remote tools (triggered by "notify;MESSAGE;TMUX_TARGET")
+    private func handleRemoteNotifyRequest(from session: Session, message: String, tmuxTarget: String?) {
+        Task { @MainActor in
+            await NotificationManager.shared.scheduleRemoteNotify(session: session, message: message, tmuxTarget: tmuxTarget)
+        }
+    }
+
+    /// Navigate to session from notification and optionally focus a tmux window/pane.
+    func navigateFromNotification(sessionId: UUID, tmuxTarget: String?) {
+        guard let session = sessions.first(where: { $0.id == sessionId }) else {
+            Logger.clauntty.warning("SessionManager: notification target session not found \(sessionId.uuidString.prefix(8))")
+            return
+        }
+
+        switchTo(session)
+
+        guard let targetRaw = tmuxTarget?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !targetRaw.isEmpty else {
+            return
+        }
+
+        pendingTmuxFocusTargets[session.id] = targetRaw
+        performPendingTmuxFocusIfNeeded(for: session)
+    }
+
+    private func performPendingTmuxFocusIfNeeded(for session: Session) {
+        guard session.state == .connected else { return }
+        guard let target = pendingTmuxFocusTargets.removeValue(forKey: session.id) else { return }
+
+        let quotedTarget = shellSingleQuoted(target)
+        let command = "tmux select-pane -t \(quotedTarget) 2>/dev/null || tmux select-window -t \(quotedTarget) 2>/dev/null || true\n"
+        session.sendData(Data(command.utf8))
+        Logger.clauntty.debugOnly("SessionManager: focused tmux target '\(target)' for session \(session.id.uuidString.prefix(8))")
+    }
+
+    private func shellSingleQuoted(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
     }
 
     /// Switch to an appropriate tab after closing one

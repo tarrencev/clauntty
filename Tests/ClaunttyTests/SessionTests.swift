@@ -228,6 +228,57 @@ final class SessionTests: XCTestCase {
 
     // MARK: - Command Message Parsing
 
+    // MARK: - Agent Session Detection
+
+    func testCodexSessionDetectionFromTitle() {
+        let config = SavedConnection(
+            name: "",
+            host: "localhost",
+            port: 22,
+            username: "test",
+            authMethod: .password
+        )
+
+        let session = Session(connectionConfig: config)
+        session.dynamicTitle = "codex - implementing changes"
+
+        XCTAssertTrue(session.isCodexSession)
+        XCTAssertTrue(session.isAgentSession)
+        XCTAssertFalse(session.isClaudeSession)
+    }
+
+    func testCodexSessionDetectionFromTmuxStyleTitle() {
+        let config = SavedConnection(
+            name: "",
+            host: "localhost",
+            port: 22,
+            username: "test",
+            authMethod: .password
+        )
+
+        let session = Session(connectionConfig: config)
+        session.dynamicTitle = "tmux: 1: codex*"
+
+        XCTAssertTrue(session.isCodexSession)
+        XCTAssertTrue(session.isAgentSession)
+    }
+
+    func testCodexWordBoundaryDetection() {
+        let config = SavedConnection(
+            name: "",
+            host: "localhost",
+            port: 22,
+            username: "test",
+            authMethod: .password
+        )
+
+        let session = Session(connectionConfig: config)
+        session.dynamicTitle = "codec test session"
+
+        XCTAssertFalse(session.isCodexSession)
+        XCTAssertFalse(session.isAgentSession)
+    }
+
     /// Helper to create a command message with rtach protocol format
     /// Format: [type: 1 byte = 2][length: 4 bytes little-endian][command string]
     private func makeCommandMessage(_ command: String) -> Data {

@@ -2,6 +2,217 @@ import UIKit
 import os.log
 import Combine
 
+enum KeyboardBarActionKind: String, Codable, CaseIterable, Identifiable {
+    case empty
+    case mic
+    case esc
+    case tab
+    case ctrl
+    case fn
+    case ctrlC
+    case ctrlO
+    case ctrlB
+    case enter
+    case backtick
+    case up
+    case down
+    case left
+    case right
+    case home
+    case end
+    case pageUp
+    case pageDown
+    case backspace
+    case deleteForward
+    case f1
+    case f2
+    case f3
+    case f4
+    case f5
+    case f6
+    case f7
+    case f8
+    case f9
+    case f10
+    case f11
+    case f12
+    case snippet
+    case customKey
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .empty: return "Empty"
+        case .mic: return "Mic"
+        case .esc: return "Esc"
+        case .tab: return "Tab"
+        case .ctrl: return "Ctrl"
+        case .fn: return "Fn"
+        case .ctrlC: return "^C"
+        case .ctrlO: return "^O"
+        case .ctrlB: return "^B"
+        case .enter: return "Enter"
+        case .backtick: return "Backtick (`)"
+        case .up: return "Up"
+        case .down: return "Down"
+        case .left: return "Left"
+        case .right: return "Right"
+        case .home: return "Home"
+        case .end: return "End"
+        case .pageUp: return "Page Up"
+        case .pageDown: return "Page Down"
+        case .backspace: return "Backspace"
+        case .deleteForward: return "Delete Forward"
+        case .f1: return "F1"
+        case .f2: return "F2"
+        case .f3: return "F3"
+        case .f4: return "F4"
+        case .f5: return "F5"
+        case .f6: return "F6"
+        case .f7: return "F7"
+        case .f8: return "F8"
+        case .f9: return "F9"
+        case .f10: return "F10"
+        case .f11: return "F11"
+        case .f12: return "F12"
+        case .snippet: return "Snippet"
+        case .customKey: return "Custom Key"
+        }
+    }
+
+    static let pickerOrder: [KeyboardBarActionKind] = [
+        .empty,
+        .mic, .esc, .tab, .ctrl, .fn, .ctrlC, .ctrlO, .ctrlB, .enter, .backtick,
+        .up, .down, .left, .right, .home, .end, .pageUp, .pageDown, .backspace, .deleteForward,
+        .f1, .f2, .f3, .f4, .f5, .f6, .f7, .f8, .f9, .f10, .f11, .f12,
+        .snippet, .customKey
+    ]
+}
+
+struct KeyboardBarAction: Codable, Equatable, Identifiable {
+    var kind: KeyboardBarActionKind
+    var snippetText: String? = nil
+    var snippetLabel: String? = nil
+    var snippetRunOnTap: Bool? = nil
+    var customText: String? = nil
+    var customLabel: String? = nil
+    var holdKind: KeyboardBarActionKind? = nil
+    var holdSnippetText: String? = nil
+    var holdSnippetLabel: String? = nil
+    var holdSnippetRunOnTap: Bool? = nil
+    var holdCustomText: String? = nil
+    var holdCustomLabel: String? = nil
+
+    var id: String {
+        "\(kind.rawValue):\(snippetLabel ?? ""):\(snippetText ?? ""):\(snippetRunOnTap ?? false):\(customLabel ?? ""):\(customText ?? ""):\(holdKind?.rawValue ?? ""):\(holdSnippetLabel ?? ""):\(holdSnippetText ?? ""):\(holdSnippetRunOnTap ?? false):\(holdCustomLabel ?? ""):\(holdCustomText ?? "")"
+    }
+
+    static func fixed(_ kind: KeyboardBarActionKind) -> KeyboardBarAction {
+        KeyboardBarAction(kind: kind)
+    }
+
+    var holdAction: KeyboardBarAction? {
+        guard let holdKind else { return nil }
+        return KeyboardBarAction(
+            kind: holdKind,
+            snippetText: holdSnippetText,
+            snippetLabel: holdSnippetLabel,
+            snippetRunOnTap: holdSnippetRunOnTap,
+            customText: holdCustomText,
+            customLabel: holdCustomLabel
+        )
+    }
+
+    mutating func setHoldAction(_ action: KeyboardBarAction?) {
+        holdKind = action?.kind
+        holdSnippetText = action?.snippetText
+        holdSnippetLabel = action?.snippetLabel
+        holdSnippetRunOnTap = action?.snippetRunOnTap
+        holdCustomText = action?.customText
+        holdCustomLabel = action?.customLabel
+    }
+}
+
+struct KeyboardBarLayout: Codable, Equatable {
+    static let leftSlotCount = 4
+    static let rightSlotCount = 4
+
+    var leftSlots: [KeyboardBarAction]
+    var rightSlots: [KeyboardBarAction]
+
+    static let `default` = KeyboardBarLayout(
+        leftSlots: [
+            .fixed(.mic),
+            .fixed(.esc),
+            .fixed(.tab),
+            .fixed(.ctrl),
+        ],
+        rightSlots: [
+            .fixed(.ctrlC),
+            .fixed(.ctrlO),
+            .fixed(.backtick),
+            .fixed(.enter),
+        ]
+    )
+
+    func normalized() -> KeyboardBarLayout {
+        var left = leftSlots
+        var right = rightSlots
+
+        if left.count > Self.leftSlotCount {
+            left = Array(left.prefix(Self.leftSlotCount))
+        } else if left.count < Self.leftSlotCount {
+            left.append(contentsOf: Array(repeating: .fixed(.empty), count: Self.leftSlotCount - left.count))
+        }
+
+        if right.count > Self.rightSlotCount {
+            right = Array(right.prefix(Self.rightSlotCount))
+        } else if right.count < Self.rightSlotCount {
+            right.append(contentsOf: Array(repeating: .fixed(.empty), count: Self.rightSlotCount - right.count))
+        }
+
+        return KeyboardBarLayout(leftSlots: left, rightSlots: right)
+    }
+}
+
+enum KeyboardBarLayoutStore {
+    static let userDefaultsKey = "keyboardBarLayout.v1"
+
+    static func load() -> KeyboardBarLayout {
+        guard let data = UserDefaults.standard.data(forKey: userDefaultsKey) else {
+            let layout = KeyboardBarLayout.default.normalized()
+            save(layout)
+            return layout
+        }
+
+        do {
+            let decoded = try JSONDecoder().decode(KeyboardBarLayout.self, from: data).normalized()
+            save(decoded)
+            return decoded
+        } catch {
+            let layout = KeyboardBarLayout.default.normalized()
+            save(layout)
+            return layout
+        }
+    }
+
+    static func save(_ layout: KeyboardBarLayout) {
+        let normalized = layout.normalized()
+        if let data = try? JSONEncoder().encode(normalized) {
+            UserDefaults.standard.set(data, forKey: userDefaultsKey)
+        }
+    }
+
+    static func reset() {
+        save(.default)
+    }
+}
+
+extension Notification.Name {
+    static let keyboardBarLayoutChanged = Notification.Name("com.clauntty.keyboardBarLayoutChanged")
+}
+
 /// Keyboard accessory bar with terminal-specific keys and arrow "nipple"
 /// iOS Notes-style pill shape with fixed center nipple and evenly distributed buttons
 /// Uses UIGlassEffect on iOS 26+ or UIBlurEffect fallback for native look
@@ -43,6 +254,13 @@ class KeyboardAccessoryView: UIView {
 
     /// Whether Option modifier is active (held via long-press on Ctrl)
     private var isOptionActive = false
+
+    /// Whether Fn modifier is active (sticky toggle for next key/action)
+    private var isFnActive = false {
+        didSet {
+            updateFnButton()
+        }
+    }
 
     /// Currently visible tooltip (for hold-down feedback)
     private var activeTooltip: HoldTooltip?
@@ -127,19 +345,22 @@ class KeyboardAccessoryView: UIView {
     private let nippleView = ArrowNippleView()
 
     /// Ctrl button reference for state updates
-    private let ctrlButton = UIButton(type: .system)
+    private var ctrlButton: UIButton?
 
     /// Ctrl container reference for expanded hit area
     private var ctrlContainer: UIView?
 
     /// Tab button reference for tooltip positioning
-    private let tabButton = UIButton(type: .system)
+    private var tabButton: UIButton?
 
     /// Tab container reference for expanded hit area
     private var tabContainer: UIView?
 
-    /// Mic button (replaces keyboard toggle)
-    private let micButton = UIButton(type: .system)
+    /// Mic button (voice input)
+    private var micButton: UIButton?
+
+    /// Fn button reference for state updates
+    private var fnButton: UIButton?
 
     /// Progress indicator for model download
     private let downloadProgressView = CircularProgressView()
@@ -175,6 +396,8 @@ class KeyboardAccessoryView: UIView {
 
     /// Combine subscriptions for audio level updates
     private var cancellables = Set<AnyCancellable>()
+    private var keyboardLayoutObserver: NSObjectProtocol?
+    private var downloadProgressConstraintsConfigured = false
 
     // MARK: - Constraints
 
@@ -190,8 +413,8 @@ class KeyboardAccessoryView: UIView {
     private let horizontalPadding: CGFloat = 12
     private let iconSize: CGFloat = 12
     private let textSize: CGFloat = 14
-    private let topPadding: CGFloat = 4
-    private let bottomPadding: CGFloat = 4
+    private let topPadding: CGFloat = 0
+    private let bottomPadding: CGFloat = 0
     private let collapsedWidth: CGFloat = 110  // keyboard button + nipple + padding
     private let dragGestureZoneHeight: CGFloat = 16
 
@@ -207,6 +430,12 @@ class KeyboardAccessoryView: UIView {
         setupView()
     }
 
+    deinit {
+        if let observer = keyboardLayoutObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
     private func setupView() {
         backgroundColor = .clear
 
@@ -215,10 +444,11 @@ class KeyboardAccessoryView: UIView {
         setupGestureZone()
         setupNipple()
         setupStackViews()
-        setupButtons()
+        applyLayout(KeyboardBarLayoutStore.load())
         setupConstraints()
         setupDismissGestures()
         setupAudioLevelObserver()
+        setupKeyboardLayoutObserver()
     }
 
     // MARK: - Gesture Zone Setup
@@ -302,119 +532,393 @@ class KeyboardAccessoryView: UIView {
         containerEffectView.contentView.addSubview(rightStackView)
     }
 
-    private func setupButtons() {
-        // Left section buttons: spacer, keyboard toggle, Esc, Tab, Ctrl, spacer
-        // Spacers create equal edge spacing with .equalSpacing distribution
+    private func setupKeyboardLayoutObserver() {
+        keyboardLayoutObserver = NotificationCenter.default.addObserver(
+            forName: .keyboardBarLayoutChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.applyLayout(KeyboardBarLayoutStore.load())
+        }
+    }
 
-        // Leading spacer (creates gap at left edge)
-        leftStackView.addArrangedSubview(leftLeadingSpacer)
+    private func applyLayout(_ layout: KeyboardBarLayout) {
+        // Clear arranged subviews before rebuilding
+        for view in leftStackView.arrangedSubviews {
+            leftStackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for view in rightStackView.arrangedSubviews {
+            rightStackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
 
-        // Mic button (replaces keyboard toggle)
+        tabButton = nil
+        tabContainer = nil
+        ctrlButton = nil
+        ctrlContainer = nil
+        fnButton = nil
+        micButton = nil
+        micContainer = nil
+
+        leftStackView.addArrangedSubview(UIView())
+        for action in layout.leftSlots {
+            leftStackView.addArrangedSubview(makeView(for: action))
+        }
+        leftStackView.addArrangedSubview(UIView())
+
+        rightStackView.addArrangedSubview(UIView())
+        for action in layout.rightSlots {
+            rightStackView.addArrangedSubview(makeView(for: action))
+        }
+        rightStackView.addArrangedSubview(UIView())
+
+        updateCtrlButton()
         updateMicButtonAppearance()
-        micButton.tintColor = .label
-        micButton.accessibilityIdentifier = "Mic"
-        micButton.addTarget(self, action: #selector(micTouchDown), for: .touchDown)
-        micButton.addTarget(self, action: #selector(micTouchUp), for: [.touchUpInside, .touchUpOutside])
-        micButton.addTarget(self, action: #selector(micTouchCancelled), for: .touchCancel)
+        updateDownloadProgressVisibility()
+        updateDownloadProgress()
+    }
 
-        // Setup download progress view (initially hidden)
+    private func makeView(for action: KeyboardBarAction) -> UIView {
+        let holdAction = action.holdAction
+
+        switch action.kind {
+        case .empty:
+            let spacer = UIView()
+            spacer.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                spacer.widthAnchor.constraint(equalToConstant: 20),
+                spacer.heightAnchor.constraint(equalToConstant: 20),
+            ])
+            return spacer
+        case .mic:
+            return makeMicActionView()
+        case .esc:
+            let button = createIconButton("escape", accessibilityId: "Esc", tooltip: "esc", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.sendEscape()
+            }
+            return createButtonWithHint(button, hint: nil)
+        case .tab:
+            return makeTabActionView(action: action)
+        case .ctrl:
+            return makeCtrlActionView(action: action)
+        case .fn:
+            let button = createTextButton("Fn", accessibilityId: "Fn", tooltip: "Fn", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.toggleFn()
+            }
+            fnButton = button
+            updateFnButton()
+            return button
+        case .ctrlC:
+            return createTextButton("^C", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }, action: { [weak self] in self?.sendCtrlC() })
+        case .ctrlO:
+            return createTextButton("^O", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }, action: { [weak self] in self?.sendCtrlO() })
+        case .ctrlB:
+            return createTextButton("^B", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }, action: { [weak self] in self?.sendCtrlB() })
+        case .enter:
+            return createIconButton("return", accessibilityId: "Enter", tooltip: "↵", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.sendEnter()
+            }
+        case .backtick:
+            return createTextButton("`", accessibilityId: "Backtick", tooltip: "`", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.sendText("`")
+            }
+        case .up:
+            return createTextButton("↑", accessibilityId: "Up", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendArrow(.up) }
+        case .down:
+            return createTextButton("↓", accessibilityId: "Down", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendArrow(.down) }
+        case .left:
+            return createTextButton("←", accessibilityId: "Left", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendArrow(.left) }
+        case .right:
+            return createTextButton("→", accessibilityId: "Right", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendArrow(.right) }
+        case .home:
+            return createTextButton("Home", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x48]) }
+        case .end:
+            return createTextButton("End", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x46]) }
+        case .pageUp:
+            return createTextButton("PgUp", accessibilityId: "PageUp", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.sendEscapeSequence([0x1B, 0x5B, 0x35, 0x7E])
+            }
+        case .pageDown:
+            return createTextButton("PgDn", accessibilityId: "PageDown", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.sendEscapeSequence([0x1B, 0x5B, 0x36, 0x7E])
+            }
+        case .backspace:
+            return createTextButton("⌫", accessibilityId: "Backspace", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }, repeatAction: { [weak self] in
+                self?.sendEscapeSequence([0x7F])
+            }) { [weak self] in
+                self?.sendEscapeSequence([0x7F])
+            }
+        case .deleteForward:
+            return createTextButton("⌦", accessibilityId: "DeleteForward", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                self?.sendEscapeSequence([0x1B, 0x5B, 0x33, 0x7E])
+            }
+        case .f1:
+            return createTextButton("F1", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x4F, 0x50]) }
+        case .f2:
+            return createTextButton("F2", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x4F, 0x51]) }
+        case .f3:
+            return createTextButton("F3", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x4F, 0x52]) }
+        case .f4:
+            return createTextButton("F4", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x4F, 0x53]) }
+        case .f5:
+            return createTextButton("F5", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x31, 0x35, 0x7E]) }
+        case .f6:
+            return createTextButton("F6", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x31, 0x37, 0x7E]) }
+        case .f7:
+            return createTextButton("F7", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x31, 0x38, 0x7E]) }
+        case .f8:
+            return createTextButton("F8", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x31, 0x39, 0x7E]) }
+        case .f9:
+            return createTextButton("F9", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x32, 0x30, 0x7E]) }
+        case .f10:
+            return createTextButton("F10", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x32, 0x31, 0x7E]) }
+        case .f11:
+            return createTextButton("F11", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x32, 0x33, 0x7E]) }
+        case .f12:
+            return createTextButton("F12", holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in self?.sendEscapeSequence([0x1B, 0x5B, 0x32, 0x34, 0x7E]) }
+        case .snippet:
+            let snippet = action.snippetText ?? ""
+            let runOnTap = action.snippetRunOnTap ?? false
+            let title = action.snippetLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                ? action.snippetLabel!
+                : "Snippet"
+            return createTextButton(title, accessibilityId: "Snippet", tooltip: title, holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                guard !snippet.isEmpty else { return }
+                self?.sendText(runOnTap ? "\(snippet)\r" : snippet)
+            }
+        case .customKey:
+            let text = action.customText ?? ""
+            let trimmedLabel = action.customLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = (trimmedLabel?.isEmpty == false ? trimmedLabel! : (text.isEmpty ? "Key" : text))
+            return createTextButton(title, accessibilityId: "CustomKey", tooltip: title, holdTooltip: holdAction?.kind.title, holdAction: { [weak self] in
+                guard let self, let holdAction else { return }
+                self.performConfiguredAction(holdAction)
+            }) { [weak self] in
+                guard !text.isEmpty else { return }
+                self?.sendText(text)
+            }
+        }
+    }
+
+    private func makeMicActionView() -> UIView {
+        let button = UIButton(type: .system)
+        button.tintColor = .label
+        button.accessibilityIdentifier = "Mic"
+        button.addTarget(self, action: #selector(micTouchDown), for: .touchDown)
+        button.addTarget(self, action: #selector(micTouchUp), for: [.touchUpInside, .touchUpOutside])
+        button.addTarget(self, action: #selector(micTouchCancelled), for: .touchCancel)
+        micButton = button
+        updateMicButtonAppearance()
+
         downloadProgressView.isHidden = true
         downloadProgressView.translatesAutoresizingMaskIntoConstraints = false
 
-        let micContainerStack = createButtonWithHint(micButton, hint: nil)
-        // Add progress view below the mic button stack
+        let micContainerStack = createButtonWithHint(button, hint: nil)
         let micWithProgress = UIStackView(arrangedSubviews: [micContainerStack, downloadProgressView])
         micWithProgress.axis = .vertical
         micWithProgress.alignment = .center
         micWithProgress.spacing = 2
 
-        NSLayoutConstraint.activate([
-            downloadProgressView.widthAnchor.constraint(equalToConstant: 24),
-            downloadProgressView.heightAnchor.constraint(equalToConstant: 4),
-        ])
-
-        leftStackView.addArrangedSubview(micWithProgress)
-        micContainer = micWithProgress
-
-        // Esc button
-        let escButton = createIconButton("escape", accessibilityId: "Esc", tooltip: "esc") { [weak self] in
-            self?.sendEscape()
+        if !downloadProgressConstraintsConfigured {
+            NSLayoutConstraint.activate([
+                downloadProgressView.widthAnchor.constraint(equalToConstant: 24),
+                downloadProgressView.heightAnchor.constraint(equalToConstant: 4),
+            ])
+            downloadProgressConstraintsConfigured = true
         }
-        let escContainer = createButtonWithHint(escButton, hint: nil)
-        leftStackView.addArrangedSubview(escContainer)
 
-        // Tab button with long-press for Shift+Tab
-        // Gestures on container so hint label is part of hit area
-        tabButton.setImage(
+        micContainer = micWithProgress
+        return micWithProgress
+    }
+
+    private func makeTabActionView(action: KeyboardBarAction) -> UIView {
+        let button = UIButton(type: .system)
+        button.setImage(
             UIImage(systemName: "arrow.right.to.line")?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
             ),
             for: .normal
         )
-        tabButton.tintColor = .label
-        tabButton.accessibilityIdentifier = "Tab"
-        tabButton.isAccessibilityElement = true
-        tabButton.isUserInteractionEnabled = false  // Let container handle touches
-        let tabContainerView = createButtonWithHint(tabButton, hint: "⇧⇥")
-        let tabTap = UITapGestureRecognizer(target: self, action: #selector(handleTabTap))
-        tabContainerView.addGestureRecognizer(tabTap)
-        let tabLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handleTabLongPress(_:)))
-        tabLongPress.minimumPressDuration = 0.2
-        tabContainerView.addGestureRecognizer(tabLongPress)
-        leftStackView.addArrangedSubview(tabContainerView)
-        tabContainer = tabContainerView
+        button.tintColor = .label
+        button.accessibilityIdentifier = "Tab"
+        button.isAccessibilityElement = true
+        button.isUserInteractionEnabled = false
+        tabButton = button
 
-        // Ctrl button (tap toggles Ctrl, long-press activates Option)
-        // Gestures on container so hint label is part of hit area
-        ctrlButton.setImage(
+        let container = createButtonWithHint(button, hint: "⇧⇥")
+        let holdAction = action.holdAction
+        let holdButton = HoldableButton(type: .custom)
+        holdButton.translatesAutoresizingMaskIntoConstraints = false
+        holdButton.backgroundColor = .clear
+        holdButton.onTap = { [weak self] in
+            guard let self else { return }
+            self.showTooltip(above: button, text: "⇥")
+            self.hideTooltipAfterDelay()
+            self.sendTab()
+        }
+        holdButton.onHold = { [weak self] in
+            guard let self else { return }
+            if let holdAction {
+                self.performConfiguredAction(holdAction)
+            } else {
+                self.sendShiftTab()
+                self.showTooltip(above: button, text: "⇧⇥")
+            }
+        }
+        holdButton.onTouchDown = { [weak self] in
+            self?.showTooltip(above: button, text: "⇥")
+        }
+        holdButton.onTouchRelease = { [weak self] in
+            self?.hideTooltipAfterDelay()
+        }
+        container.addSubview(holdButton)
+        NSLayoutConstraint.activate([
+            holdButton.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            holdButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            holdButton.topAnchor.constraint(equalTo: container.topAnchor),
+            holdButton.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        tabContainer = container
+        return container
+    }
+
+    private func makeCtrlActionView(action: KeyboardBarAction) -> UIView {
+        let button = UIButton(type: .system)
+        button.setImage(
             UIImage(systemName: "control")?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
             ),
             for: .normal
         )
-        ctrlButton.tintColor = .label
-        ctrlButton.accessibilityIdentifier = "Ctrl"
-        ctrlButton.isAccessibilityElement = true
-        ctrlButton.isUserInteractionEnabled = false  // Let container handle touches
-        let ctrlContainerView = createButtonWithHint(ctrlButton, hint: "⌥")
-        let ctrlTap = UITapGestureRecognizer(target: self, action: #selector(handleCtrlTap))
-        ctrlContainerView.addGestureRecognizer(ctrlTap)
-        let ctrlLongPress = UILongPressGestureRecognizer(target: self, action: #selector(handleCtrlLongPress(_:)))
-        ctrlLongPress.minimumPressDuration = 0.2
-        ctrlContainerView.addGestureRecognizer(ctrlLongPress)
-        leftStackView.addArrangedSubview(ctrlContainerView)
-        ctrlContainer = ctrlContainerView
+        button.tintColor = .label
+        button.accessibilityIdentifier = "Ctrl"
+        button.isAccessibilityElement = true
+        button.isUserInteractionEnabled = false
+        ctrlButton = button
 
-        // Trailing spacer (creates gap before nipple)
-        leftStackView.addArrangedSubview(leftTrailingSpacer)
-
-        // Right section buttons: spacer, ^C, ^O, ^B, Enter, spacer
-
-        // Leading spacer (creates gap after nipple)
-        rightStackView.addArrangedSubview(rightLeadingSpacer)
-
-        let ctrlCButton = createTextButton("^C") { [weak self] in
-            self?.sendCtrlC()
+        let container = createButtonWithHint(button, hint: "⌥")
+        let holdAction = action.holdAction
+        let holdButton = HoldableButton(type: .custom)
+        holdButton.translatesAutoresizingMaskIntoConstraints = false
+        holdButton.backgroundColor = .clear
+        holdButton.onTap = { [weak self] in
+            self?.handleCtrlTap()
         }
-        rightStackView.addArrangedSubview(ctrlCButton)
-
-        let ctrlOButton = createTextButton("^O") { [weak self] in
-            self?.sendCtrlO()
+        holdButton.onHold = { [weak self] in
+            guard let self else { return }
+            if let holdAction {
+                self.performConfiguredAction(holdAction)
+            } else {
+                self.handleCtrlDefaultLongPress()
+            }
         }
-        rightStackView.addArrangedSubview(ctrlOButton)
-
-        let ctrlBButton = createTextButton("^B") { [weak self] in
-            self?.sendCtrlB()
+        holdButton.onTouchDown = { [weak self] in
+            self?.showTooltip(above: button, text: self?.isOptionActive == true ? "⌥" : "⌃")
         }
-        rightStackView.addArrangedSubview(ctrlBButton)
-
-        let enterButton = createIconButton("return", accessibilityId: "Enter", tooltip: "↵") { [weak self] in
-            self?.sendEnter()
+        holdButton.onTouchRelease = { [weak self] in
+            self?.hideTooltipAfterDelay()
         }
-        rightStackView.addArrangedSubview(enterButton)
-
-        // Trailing spacer (creates gap at right edge)
-        rightStackView.addArrangedSubview(rightTrailingSpacer)
+        container.addSubview(holdButton)
+        NSLayoutConstraint.activate([
+            holdButton.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            holdButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            holdButton.topAnchor.constraint(equalTo: container.topAnchor),
+            holdButton.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        ctrlContainer = container
+        return container
     }
 
     private func setupConstraints() {
@@ -516,8 +1020,15 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Button Creation
 
-    private func createIconButton(_ systemName: String, accessibilityId: String, tooltip: String? = nil, action: @escaping () -> Void) -> UIButton {
-        let button = UIButton(type: .system)
+    private func createIconButton(
+        _ systemName: String,
+        accessibilityId: String,
+        tooltip: String? = nil,
+        holdTooltip: String? = nil,
+        holdAction: (() -> Void)? = nil,
+        action: @escaping () -> Void
+    ) -> UIButton {
+        let button = HoldableButton(type: .system)
         button.setImage(
             UIImage(systemName: systemName)?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
@@ -527,37 +1038,62 @@ class KeyboardAccessoryView: UIView {
         button.tintColor = .label
         button.accessibilityIdentifier = accessibilityId
         button.isAccessibilityElement = true
-        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
-
-        // Add tooltip feedback on touch
-        if let tooltipText = tooltip {
-            button.addAction(UIAction { [weak self] _ in
+        button.onTap = action
+        button.onTouchDown = { [weak self] in
+            if let tooltipText = tooltip {
                 self?.showTooltip(above: button, text: tooltipText)
-            }, for: .touchDown)
-            button.addAction(UIAction { [weak self] _ in
-                self?.hideTooltipAfterDelay()
-            }, for: [.touchUpInside, .touchUpOutside, .touchCancel])
+            }
+        }
+        button.onTouchRelease = { [weak self] in
+            self?.hideTooltipAfterDelay()
+        }
+        if let holdAction {
+            button.onHold = { [weak self] in
+                if let holdTooltip {
+                    self?.showTooltip(above: button, text: holdTooltip)
+                }
+                holdAction()
+            }
         }
         return button
     }
 
-    private func createTextButton(_ title: String, tooltip: String? = nil, action: @escaping () -> Void) -> UIButton {
-        let button = UIButton(type: .system)
+    private func createTextButton(
+        _ title: String,
+        accessibilityId: String? = nil,
+        tooltip: String? = nil,
+        holdTooltip: String? = nil,
+        holdAction: (() -> Void)? = nil,
+        repeatAction: (() -> Void)? = nil,
+        action: @escaping () -> Void
+    ) -> UIButton {
+        let button = HoldableButton(type: .system)
         button.setTitle(title, for: .normal)
         button.titleLabel?.font = .systemFont(ofSize: textSize, weight: .medium)
         button.setTitleColor(.label, for: .normal)
-        button.accessibilityIdentifier = title
+        button.accessibilityIdentifier = accessibilityId ?? title
         button.isAccessibilityElement = true
-        button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        button.onTap = action
 
         // Add tooltip feedback on touch
         let tooltipText = tooltip ?? title
-        button.addAction(UIAction { [weak self] _ in
+        button.onTouchDown = { [weak self] in
             self?.showTooltip(above: button, text: tooltipText)
-        }, for: .touchDown)
-        button.addAction(UIAction { [weak self] _ in
+        }
+        button.onTouchRelease = { [weak self] in
             self?.hideTooltipAfterDelay()
-        }, for: [.touchUpInside, .touchUpOutside, .touchCancel])
+        }
+        if let holdAction {
+            button.onHold = { [weak self] in
+                if let holdTooltip {
+                    self?.showTooltip(above: button, text: holdTooltip)
+                }
+                holdAction()
+            }
+        }
+        if let repeatAction {
+            button.onRepeatTick = repeatAction
+        }
         return button
     }
 
@@ -584,9 +1120,9 @@ class KeyboardAccessoryView: UIView {
 
     private func updateCtrlButton() {
         if isCtrlActive {
-            ctrlButton.tintColor = .systemBlue
+            ctrlButton?.tintColor = .systemBlue
         } else {
-            ctrlButton.tintColor = .label
+            ctrlButton?.tintColor = .label
         }
     }
 
@@ -605,13 +1141,13 @@ class KeyboardAccessoryView: UIView {
             tintColor = isSpeechModelReady ? .label : .secondaryLabel
         }
 
-        micButton.setImage(
+        micButton?.setImage(
             UIImage(systemName: iconName)?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
             ),
             for: .normal
         )
-        micButton.tintColor = tintColor
+        micButton?.tintColor = tintColor
     }
 
     /// Called when keyboard visibility changes externally
@@ -832,7 +1368,9 @@ class KeyboardAccessoryView: UIView {
         // If model is downloading, show status tooltip instead of re-prompting
         if isSpeechModelDownloading {
             let progressPercent = Int(downloadProgress * 100)
-            showTooltip(above: micButton, text: "Downloading... \(progressPercent)%")
+            if let micButton = micButton {
+                showTooltip(above: micButton, text: "Downloading... \(progressPercent)%")
+            }
             hideTooltipAfterDelay(delay: 1.5)
             Logger.clauntty.debugOnly("[AccessoryBar] mic tap during download, progress: \(progressPercent)%")
             return
@@ -891,79 +1429,139 @@ class KeyboardAccessoryView: UIView {
 
     // MARK: - Key Actions
 
+    private func performConfiguredAction(_ action: KeyboardBarAction) {
+        switch action.kind {
+        case .empty:
+            return
+        case .mic:
+            return
+        case .esc:
+            sendEscape()
+        case .tab:
+            sendTab()
+        case .ctrl:
+            toggleCtrl()
+        case .fn:
+            toggleFn()
+        case .ctrlC:
+            sendCtrlC()
+        case .ctrlO:
+            sendCtrlO()
+        case .ctrlB:
+            sendCtrlB()
+        case .enter:
+            sendEnter()
+        case .backtick:
+            sendText("`")
+        case .up:
+            sendArrow(.up)
+        case .down:
+            sendArrow(.down)
+        case .left:
+            sendArrow(.left)
+        case .right:
+            sendArrow(.right)
+        case .home:
+            sendEscapeSequence([0x1B, 0x5B, 0x48])
+        case .end:
+            sendEscapeSequence([0x1B, 0x5B, 0x46])
+        case .pageUp:
+            sendEscapeSequence([0x1B, 0x5B, 0x35, 0x7E])
+        case .pageDown:
+            sendEscapeSequence([0x1B, 0x5B, 0x36, 0x7E])
+        case .backspace:
+            sendEscapeSequence([0x7F])
+        case .deleteForward:
+            sendEscapeSequence([0x1B, 0x5B, 0x33, 0x7E])
+        case .f1:
+            sendEscapeSequence([0x1B, 0x4F, 0x50])
+        case .f2:
+            sendEscapeSequence([0x1B, 0x4F, 0x51])
+        case .f3:
+            sendEscapeSequence([0x1B, 0x4F, 0x52])
+        case .f4:
+            sendEscapeSequence([0x1B, 0x4F, 0x53])
+        case .f5:
+            sendEscapeSequence([0x1B, 0x5B, 0x31, 0x35, 0x7E])
+        case .f6:
+            sendEscapeSequence([0x1B, 0x5B, 0x31, 0x37, 0x7E])
+        case .f7:
+            sendEscapeSequence([0x1B, 0x5B, 0x31, 0x38, 0x7E])
+        case .f8:
+            sendEscapeSequence([0x1B, 0x5B, 0x31, 0x39, 0x7E])
+        case .f9:
+            sendEscapeSequence([0x1B, 0x5B, 0x32, 0x30, 0x7E])
+        case .f10:
+            sendEscapeSequence([0x1B, 0x5B, 0x32, 0x31, 0x7E])
+        case .f11:
+            sendEscapeSequence([0x1B, 0x5B, 0x32, 0x33, 0x7E])
+        case .f12:
+            sendEscapeSequence([0x1B, 0x5B, 0x32, 0x34, 0x7E])
+        case .snippet:
+            guard let text = action.snippetText, !text.isEmpty else { return }
+            if action.snippetRunOnTap ?? false {
+                sendText("\(text)\r")
+            } else {
+                sendText(text)
+            }
+        case .customKey:
+            guard let text = action.customText, !text.isEmpty else { return }
+            sendText(text)
+        }
+    }
+
     private func sendEscape() {
-        onKeyInput?(Data([0x1B]))
+        sendKeyData(Data([0x1B]))
     }
 
     private func sendTab() {
-        onKeyInput?(Data([0x09]))
-    }
-
-    @objc private func handleTabTap() {
-        showTooltip(above: tabButton, text: "⇥")
-        hideTooltipAfterDelay()
-        sendTab()
-    }
-
-    @objc private func handleTabLongPress(_ gesture: UILongPressGestureRecognizer) {
-        switch gesture.state {
-        case .began:
-            sendShiftTab()
-            showTooltip(above: tabButton, text: "⇧⇥")
-        case .ended, .cancelled:
-            hideTooltip()
-        default:
-            break
-        }
+        sendKeyData(Data([0x09]))
     }
 
     @objc private func handleCtrlTap() {
         // Show ⌃ for Ctrl, or ⌥ if deactivating Option
         let tooltipText = isOptionActive ? "⌥" : "⌃"
-        showTooltip(above: ctrlButton, text: tooltipText)
+        if let ctrlButton = ctrlButton {
+            showTooltip(above: ctrlButton, text: tooltipText)
+        }
         hideTooltipAfterDelay()
         toggleCtrl()
     }
 
-    @objc private func handleCtrlLongPress(_ gesture: UILongPressGestureRecognizer) {
-        switch gesture.state {
-        case .began:
-            if isOptionActive {
-                // If Option already active, deactivate it
-                isOptionActive = false
-                resetToCtrlState()
-            } else {
-                // Clear Ctrl if active, activate Option (sticky)
-                isCtrlActive = false
-                isOptionActive = true
-                showOptionState()
+    private func handleCtrlDefaultLongPress() {
+        if isOptionActive {
+            // If Option already active, deactivate it
+            isOptionActive = false
+            resetToCtrlState()
+        } else {
+            // Clear Ctrl if active, activate Option (sticky)
+            isCtrlActive = false
+            isOptionActive = true
+            showOptionState()
+            if let ctrlButton = ctrlButton {
                 showTooltip(above: ctrlButton, text: "⌥")
             }
-        case .ended, .cancelled:
-            hideTooltip()
-        default:
-            break
         }
     }
 
     private func showOptionState() {
         UIView.animate(withDuration: 0.15) {
-            self.ctrlButton.transform = CGAffineTransform(translationX: 0, y: -3)
+            self.ctrlButton?.transform = CGAffineTransform(translationX: 0, y: -3)
         }
-        ctrlButton.setImage(
+        ctrlButton?.setImage(
             UIImage(systemName: "option")?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
             ),
             for: .normal
         )
-        ctrlButton.tintColor = .systemBlue
+        ctrlButton?.tintColor = .systemBlue
     }
 
     private func resetToCtrlState() {
         UIView.animate(withDuration: 0.15) {
-            self.ctrlButton.transform = .identity
+            self.ctrlButton?.transform = .identity
         }
-        ctrlButton.setImage(
+        ctrlButton?.setImage(
             UIImage(systemName: "control")?.withConfiguration(
                 UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
             ),
@@ -974,7 +1572,7 @@ class KeyboardAccessoryView: UIView {
 
     private func sendShiftTab() {
         // Shift+Tab = CSI Z (Back Tab / CBT)
-        onKeyInput?(Data([0x1B, 0x5B, 0x5A]))  // ESC [ Z
+        sendKeyData(Data([0x1B, 0x5B, 0x5A]))  // ESC [ Z
     }
 
     private func toggleCtrl() {
@@ -1054,6 +1652,20 @@ class KeyboardAccessoryView: UIView {
     }
 
     private func sendArrow(_ direction: ArrowNippleView.Direction) {
+        if consumeFnModifier() {
+            switch direction {
+            case .up:
+                sendEscapeSequence([0x1B, 0x5B, 0x35, 0x7E])  // PgUp
+            case .down:
+                sendEscapeSequence([0x1B, 0x5B, 0x36, 0x7E])  // PgDn
+            case .right:
+                sendEscapeSequence([0x1B, 0x5B, 0x46])  // End
+            case .left:
+                sendEscapeSequence([0x1B, 0x5B, 0x48])  // Home
+            }
+            return
+        }
+
         let data: Data
         switch direction {
         case .up:
@@ -1065,7 +1677,7 @@ class KeyboardAccessoryView: UIView {
         case .left:
             data = Data([0x1B, 0x5B, 0x44])    // ESC [ D
         }
-        onKeyInput?(data)
+        sendKeyData(data)
 
         // If Ctrl was active, clear it after use
         if isCtrlActive {
@@ -1074,23 +1686,86 @@ class KeyboardAccessoryView: UIView {
     }
 
     private func sendCtrlC() {
-        onKeyInput?(Data([0x03]))  // ETX
+        sendKeyData(Data([0x03]))  // ETX
     }
 
     private func sendCtrlO() {
-        onKeyInput?(Data([0x0F]))  // SI (Ctrl+O)
+        sendKeyData(Data([0x0F]))  // SI (Ctrl+O)
     }
 
     private func sendCtrlB() {
-        onKeyInput?(Data([0x02]))  // STX (Ctrl+B)
+        sendKeyData(Data([0x02]))  // STX (Ctrl+B)
     }
 
     private func sendEnter() {
-        onKeyInput?(Data([0x0D]))  // CR (Return/Enter)
+        sendKeyData(Data([0x0D]))  // CR (Return/Enter)
+    }
+
+    private func sendEscapeSequence(_ bytes: [UInt8]) {
+        sendKeyData(Data(bytes))
+    }
+
+    private func sendText(_ text: String) {
+        if consumeFnModifier() {
+            if let mapped = mappedFnData(for: text) {
+                sendKeyData(mapped)
+                return
+            }
+        }
+        if let data = text.data(using: .utf8) {
+            sendKeyData(data)
+        }
+    }
+
+    private func sendKeyData(_ data: Data) {
+        onKeyInput?(data)
+    }
+
+    private func toggleFn() {
+        isFnActive.toggle()
+    }
+
+    private func updateFnButton() {
+        fnButton?.tintColor = isFnActive ? .systemBlue : .label
+    }
+
+    /// Check if Fn is active and consume it for one-shot behavior.
+    func consumeFnModifier() -> Bool {
+        if isFnActive {
+            isFnActive = false
+            return true
+        }
+        return false
+    }
+
+    /// Map Fn+character to terminal function key escape sequences.
+    func mappedFnData(for text: String) -> Data? {
+        guard text.count == 1 else { return nil }
+        guard let char = text.first else { return nil }
+        return Self.fnMappedData(for: char)
+    }
+
+    static func fnMappedData(for char: Character) -> Data? {
+        switch char {
+        case "1": return Data([0x1B, 0x4F, 0x50]) // F1
+        case "2": return Data([0x1B, 0x4F, 0x51]) // F2
+        case "3": return Data([0x1B, 0x4F, 0x52]) // F3
+        case "4": return Data([0x1B, 0x4F, 0x53]) // F4
+        case "5": return Data([0x1B, 0x5B, 0x31, 0x35, 0x7E]) // F5
+        case "6": return Data([0x1B, 0x5B, 0x31, 0x37, 0x7E]) // F6
+        case "7": return Data([0x1B, 0x5B, 0x31, 0x38, 0x7E]) // F7
+        case "8": return Data([0x1B, 0x5B, 0x31, 0x39, 0x7E]) // F8
+        case "9": return Data([0x1B, 0x5B, 0x32, 0x30, 0x7E]) // F9
+        case "0": return Data([0x1B, 0x5B, 0x32, 0x31, 0x7E]) // F10
+        case "-": return Data([0x1B, 0x5B, 0x32, 0x33, 0x7E]) // F11
+        case "=": return Data([0x1B, 0x5B, 0x32, 0x34, 0x7E]) // F12
+        default:
+            return nil
+        }
     }
 
     override var intrinsicContentSize: CGSize {
-        // topPadding above bar + barHeight + bottomPadding for spacing to keyboard
+        // topPadding above bar + barHeight + bottomPadding
         return CGSize(width: UIView.noIntrinsicMetric, height: topPadding + barHeight + bottomPadding)
     }
 
@@ -1318,6 +1993,105 @@ class CollapsedKeyboardBar: UIView {
 }
 
 // MARK: - Hold Tooltip
+
+/// Button that supports primary tap + hold action without firing tap after hold.
+private class HoldableButton: UIButton {
+    var onTap: (() -> Void)?
+    var onHold: (() -> Void)?
+    var onRepeatTick: (() -> Void)?
+    var onTouchDown: (() -> Void)?
+    var onTouchRelease: (() -> Void)?
+
+    private var holdTimer: Timer?
+    private var repeatDelayTimer: Timer?
+    private var repeatTimer: Timer?
+    private var holdTriggered = false
+    private var repeatTriggered = false
+    private let holdThreshold: TimeInterval = 0.28
+    private let repeatInitialDelay: TimeInterval = 0.24
+    private let repeatInterval: TimeInterval = 0.055
+
+    private func scheduleTimer(
+        interval: TimeInterval,
+        repeats: Bool,
+        _ block: @escaping (Timer) -> Void
+    ) -> Timer {
+        let timer = Timer(timeInterval: interval, repeats: repeats, block: block)
+        RunLoop.main.add(timer, forMode: .common)
+        return timer
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        wireEvents()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wireEvents()
+    }
+
+    private func wireEvents() {
+        addTarget(self, action: #selector(touchDown), for: .touchDown)
+        addTarget(self, action: #selector(touchUpInside), for: .touchUpInside)
+        addTarget(self, action: #selector(touchEnded), for: [.touchUpOutside, .touchCancel])
+    }
+
+    @objc private func touchDown() {
+        onTouchDown?()
+        holdTriggered = false
+        repeatTriggered = false
+        holdTimer?.invalidate()
+        repeatDelayTimer?.invalidate()
+        repeatTimer?.invalidate()
+        if onHold != nil {
+            holdTimer = scheduleTimer(interval: holdThreshold, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                self.holdTriggered = true
+                self.onHold?()
+            }
+        }
+
+        if onRepeatTick != nil {
+            repeatDelayTimer = self.scheduleTimer(interval: repeatInitialDelay, repeats: false) { [weak self] _ in
+                guard let self else { return }
+                self.repeatTriggered = true
+                self.onRepeatTick?()
+                self.repeatTimer = self.scheduleTimer(interval: self.repeatInterval, repeats: true) { [weak self] _ in
+                    self?.onRepeatTick?()
+                }
+            }
+        }
+    }
+
+    @objc private func touchUpInside() {
+        holdTimer?.invalidate()
+        repeatDelayTimer?.invalidate()
+        repeatTimer?.invalidate()
+        holdTimer = nil
+        repeatDelayTimer = nil
+        repeatTimer = nil
+        defer {
+            holdTriggered = false
+            repeatTriggered = false
+            onTouchRelease?()
+        }
+        guard !holdTriggered, !repeatTriggered else { return }
+        onTap?()
+    }
+
+    @objc private func touchEnded() {
+        holdTimer?.invalidate()
+        repeatDelayTimer?.invalidate()
+        repeatTimer?.invalidate()
+        holdTimer = nil
+        repeatDelayTimer = nil
+        repeatTimer = nil
+        holdTriggered = false
+        repeatTriggered = false
+        onTouchRelease?()
+    }
+}
 
 /// Small floating tooltip shown when holding down a button for alternate action
 private class HoldTooltip: UIView {
