@@ -117,6 +117,23 @@ fi
 
 cd "$PROJECT_DIR"
 
+# Ensure required third-party bits are present for Xcode to build.
+if [[ ! -d "ThirdParty/mosh/src" || ! -d "ThirdParty/protobuf/src" ]]; then
+  log "Initializing ThirdParty submodules (mosh, protobuf)..."
+  git submodule update --init --recursive ThirdParty/mosh ThirdParty/protobuf
+  ok "ThirdParty submodules ready"
+fi
+
+if [[ ! -e "Frameworks/GhosttyKit.xcframework" ]]; then
+  fail "Frameworks/GhosttyKit.xcframework is missing (or its symlink target is missing). Run ./scripts/init.sh first."
+fi
+
+if [[ ! -e "Frameworks/MoshClient.xcframework" ]]; then
+  log "MoshClient.xcframework missing; building it..."
+  ./scripts/build-mosh.sh
+  ok "MoshClient build complete"
+fi
+
 DESTINATION="platform=iOS,name=${DEVICE_NAME}"
 
 log "Building ${SCHEME} for device \"${DEVICE_NAME}\"..."

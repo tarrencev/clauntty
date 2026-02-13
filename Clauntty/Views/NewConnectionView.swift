@@ -11,6 +11,7 @@ struct NewConnectionView: View {
     @State private var host: String
     @State private var port: String
     @State private var username: String
+    @State private var transport: ConnectionTransport = .ssh
     @State private var authType: AuthType = .password
     @State private var password: String = ""
     @State private var savePassword: Bool = true
@@ -37,6 +38,7 @@ struct NewConnectionView: View {
             _host = State(initialValue: existing.host)
             _port = State(initialValue: String(existing.port))
             _username = State(initialValue: existing.username)
+            _transport = State(initialValue: existing.transport)
             switch existing.authMethod {
             case .password:
                 _authType = State(initialValue: .password)
@@ -59,6 +61,12 @@ struct NewConnectionView: View {
                     TextField("Name (optional)", text: $name)
                         .textInputAutocapitalization(.never)
 
+                    Picker("Connection Type", selection: $transport) {
+                        ForEach(ConnectionTransport.allCases, id: \.self) { t in
+                            Text(t.displayName).tag(t)
+                        }
+                    }
+
                     TextField("Host", text: $host)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
@@ -70,6 +78,12 @@ struct NewConnectionView: View {
                     TextField("Username", text: $username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+
+                    if transport == .mosh {
+                        Text("Mosh requires `mosh-server` on the remote host and UDP access to the server's mosh ports.")
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
                 Section("Authentication") {
@@ -224,7 +238,8 @@ struct NewConnectionView: View {
             port: portNumber,
             username: trimmedUsername,
             authMethod: authMethod,
-            lastConnected: existingConnection?.lastConnected
+            lastConnected: existingConnection?.lastConnected,
+            transport: transport
         )
 
         // Check for duplicate (same host, port, username, and name)

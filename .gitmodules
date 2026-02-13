@@ -1,0 +1,6 @@
+[submodule "ThirdParty/mosh"]
+	path = ThirdParty/mosh
+	url = https://github.com/mobile-shell/mosh.git
+[submodule "ThirdParty/protobuf"]
+	path = ThirdParty/protobuf
+	url = https://github.com/protocolbuffers/protobuf.git

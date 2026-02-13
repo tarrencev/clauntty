@@ -263,6 +263,12 @@ struct TerminalView: View {
         // Always wire up the display - we need this for data flow regardless of connection state
         wireSessionToSurface(surface: surface)
 
+        // Flush any output that arrived before the surface was ready.
+        let pending = session.drainPendingSurfaceOutput()
+        if !pending.isEmpty {
+            surface.writeSSHOutput(pending)
+        }
+
         // If already connected, just send window change to fix terminal size
         // This handles the case where auto-connect ran before surface was ready
         if case .connected = session.state {
@@ -296,17 +302,6 @@ struct TerminalView: View {
                     let size = surface.terminalSize
                     Logger.clauntty.debugOnly("Sending initial window size: \(size.columns)x\(size.rows)")
                     session.sendWindowChange(rows: size.rows, columns: size.columns)
-                }
-
-                // Replay any scrollback buffer that was accumulated
-                if !session.scrollbackBuffer.isEmpty {
-                    if session.usesRtach {
-                        Logger.clauntty.debugOnly("Skipping local scrollback replay for rtach session \(session.id.uuidString.prefix(8))")
-                    } else {
-                        await MainActor.run {
-                            surface.writeSSHOutput(session.scrollbackBuffer)
-                        }
-                    }
                 }
             } catch {
                 Logger.clauntty.error("Session connection failed: \(error.localizedDescription)")

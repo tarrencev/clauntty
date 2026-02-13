@@ -57,7 +57,8 @@ class ConnectionStore: ObservableObject {
             existing.host.lowercased() == connection.host.lowercased() &&
             existing.port == connection.port &&
             existing.username == connection.username &&
-            existing.name.lowercased() == connection.name.lowercased()
+            existing.name.lowercased() == connection.name.lowercased() &&
+            existing.transport == connection.transport
         }
     }
 

@@ -344,4 +344,30 @@ final class SessionManagerTests: XCTestCase {
 
         XCTAssertTrue(sessionManager.hasSessions)
     }
+
+    // MARK: - Mosh Bootstrap
+
+    func testMoshBootstrapParsesConnectLine() throws {
+        let output = """
+        mosh-server (some banner)
+        MOSH CONNECT 60002 abcdefghijklmnopqrstuv
+        """
+
+        let result = try MoshBootstrap.parseMoshServerOutput(output)
+        XCTAssertEqual(result.udpPort, 60002)
+        XCTAssertEqual(result.key, "abcdefghijklmnopqrstuv")
+    }
+
+    func testMoshBootstrapThrowsOnMissingConnectLine() {
+        XCTAssertThrowsError(try MoshBootstrap.parseMoshServerOutput("no connect line")) { error in
+            XCTAssertEqual(error as? MoshBootstrapError, .invalidOutput("no connect line"))
+        }
+    }
+
+    func testMoshBootstrapDetectsMissingMoshServer() {
+        let output = "bash: mosh-server: command not found"
+        XCTAssertThrowsError(try MoshBootstrap.parseMoshServerOutput(output)) { error in
+            XCTAssertEqual(error as? MoshBootstrapError, .moshServerNotInstalled(output))
+        }
+    }
 }

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		06E63D06C52859FA31DA95C7 /* SSHKeyImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */; };
+		024CE38D33404DC69175B595 /* Licenses in Resources */ = {isa = PBXBuildFile; fileRef = 68BDD2CD1D6149BDBF8F7886 /* Licenses */; };
 		1855E705517197F275A5035F /* GhosttyBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94312DEE2648E8104E3AE53 /* GhosttyBridgeTests.swift */; };
 		3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */; };
 		431B348146F6153B8D328E91 /* PersistedTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB2F7E3BA46CBFE04CA0A92D /* PersistedTab.swift */; };
@@ -26,6 +27,10 @@
 		876C56372EFB1A6E00B28BC1 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = C8000001 /* NIOPosix */; };
 		876C56382EFB1A6E00B28BC1 /* NIOSSH in Frameworks */ = {isa = PBXBuildFile; productRef = C8000002 /* NIOSSH */; };
 		8D50D6A34930F5200F1440E2 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7856CABCC7D9170DD7EF307F /* Foundation.framework */; };
+		946BC80298724BB8B509FC29 /* MoshClientSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12EB422EA4A0467C9F061DDC /* MoshClientSession.swift */; };
+		16BEF38F492343C3B3FCC707 /* MoshBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A66C010F2ED48CFBFCF11FD /* MoshBootstrap.swift */; };
+		AD6CCE14B6E84867B00A59C8 /* MoshClient.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4E3912D5DBDC415CB3CF2D27 /* MoshClient.xcframework */; };
+		AE45DA6714634EE48F7D5A17 /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = 76E5CC93B0BE410EABD61D76 /* libz.tbd */; };
 		8E8B63B583F4D2BF2E6F18FD /* PortScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */; };
 		8EE9D92CA010B003B254D7CA /* PortForwardingManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94FD4C0609201D6B2B27B36C /* PortForwardingManager.swift */; };
 		ADA5806394E7136002E7FE76 /* ServerPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CD476298B71607D9BDB445C /* ServerPickerView.swift */; };
@@ -68,6 +73,7 @@
 		E1000001 /* SSHConnectionUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2000001 /* SSHConnectionUITests.swift */; };
 		EE2DD46DA05C44309BB94180 /* FullTabSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */; };
 		F9C5C4A2CF04EB4C6A929250 /* ExpandedTabOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */; };
+		E4CFB94A59B244ACA0E4577D /* LicensesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 09E9D37F75B043AFA8651BA8 /* LicensesView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -90,16 +96,22 @@
 /* Begin PBXFileReference section */
 		023CB6A418E69A8A30B29261 /* SSHConnectionTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = SSHConnectionTests.swift; path = ../Tests/ClaunttyTests/SSHConnectionTests.swift; sourceTree = "<group>"; };
 		0CD476298B71607D9BDB445C /* ServerPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ServerPickerView.swift; sourceTree = "<group>"; };
+		09E9D37F75B043AFA8651BA8 /* LicensesView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LicensesView.swift; sourceTree = "<group>"; };
+		12EB422EA4A0467C9F061DDC /* MoshClientSession.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MoshClientSession.swift; sourceTree = "<group>"; };
+		6A66C010F2ED48CFBFCF11FD /* MoshBootstrap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MoshBootstrap.swift; sourceTree = "<group>"; };
 		28503FD938162D88F8B6A69F /* WebTabView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WebTabView.swift; sourceTree = "<group>"; };
 		297EA9CE961BFF920036934A /* SelectionHandleView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SelectionHandleView.swift; sourceTree = "<group>"; };
 		2A3E2A64FA9B3B72703629BB /* ThemeManager.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemeManager.swift; sourceTree = "<group>"; };
 		2B132CCB8899C9B9D34FDA68 /* PortScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortScanner.swift; sourceTree = "<group>"; };
+		4E3912D5DBDC415CB3CF2D27 /* MoshClient.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = MoshClient.xcframework; sourceTree = "<group>"; };
 		55E4F41052A28ACE836DF03B /* SSHKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyStore.swift; sourceTree = "<group>"; };
 		59A3663E616FC97D48E5888C /* SessionPickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionPickerView.swift; sourceTree = "<group>"; };
 		620BF993225325AE2636ED6D /* ExpandedTabOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ExpandedTabOverlay.swift; sourceTree = "<group>"; };
 		66B1CA5D0C2290DD8C5A6A5B /* FullTabSelector.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FullTabSelector.swift; sourceTree = "<group>"; };
+		68BDD2CD1D6149BDBF8F7886 /* Licenses */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder; path = Licenses; sourceTree = "<group>"; };
 		7856CABCC7D9170DD7EF307F /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS18.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
 		7CF1104A268D6275CA1C3278 /* ThemePickerView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ThemePickerView.swift; sourceTree = "<group>"; };
+		76E5CC93B0BE410EABD61D76 /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 		82281A22E5E692A251B06D6B /* ClaunttyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ClaunttyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		8B06CB21407D10878E71D108 /* SSHKeyImportSheet.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SSHKeyImportSheet.swift; sourceTree = "<group>"; };
 		90C4942FCDCE7BA2887C829A /* LiquidGlassTabBar.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiquidGlassTabBar.swift; sourceTree = "<group>"; };
@@ -169,6 +181,8 @@
 				876C56372EFB1A6E00B28BC1 /* NIOPosix in Frameworks */,
 				876C56362EFB1A6E00B28BC1 /* NIOCore in Frameworks */,
 				C0000020 /* GhosttyKit.xcframework in Frameworks */,
+				AD6CCE14B6E84867B00A59C8 /* MoshClient.xcframework in Frameworks */,
+				AE45DA6714634EE48F7D5A17 /* libz.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -186,6 +200,7 @@
 			isa = PBXGroup;
 			children = (
 				7856CABCC7D9170DD7EF307F /* Foundation.framework */,
+				76E5CC93B0BE410EABD61D76 /* libz.tbd */,
 			);
 			name = iOS;
 			sourceTree = "<group>";
@@ -229,11 +244,21 @@
 				C1000001 /* ClaunttyApp.swift */,
 				C1000002 /* ContentView.swift */,
 				C3000002 /* Core */,
+				B532E1EEE6834607A26E3405 /* Mosh */,
 				C3000006 /* Views */,
 				C3000007 /* Models */,
 				C3000008 /* Resources */,
 			);
 			path = Clauntty;
+			sourceTree = "<group>";
+		};
+		B532E1EEE6834607A26E3405 /* Mosh */ = {
+			isa = PBXGroup;
+			children = (
+				12EB422EA4A0467C9F061DDC /* MoshClientSession.swift */,
+				6A66C010F2ED48CFBFCF11FD /* MoshBootstrap.swift */,
+			);
+			path = Mosh;
 			sourceTree = "<group>";
 		};
 		C3000002 /* Core */ = {
@@ -294,6 +319,7 @@
 				59A3663E616FC97D48E5888C /* SessionPickerView.swift */,
 				28503FD938162D88F8B6A69F /* WebTabView.swift */,
 				C1000025 /* SettingsView.swift */,
+				09E9D37F75B043AFA8651BA8 /* LicensesView.swift */,
 				C1000028 /* PortsSheetView.swift */,
 				297EA9CE961BFF920036934A /* SelectionHandleView.swift */,
 				DFCD20EE71377F3F8FBB4C5E /* LiquidGlassTabBar */,
@@ -319,6 +345,7 @@
 				C1000009 /* Assets.xcassets */,
 				C1000022 /* rtach */,
 				ABF7282BEC77B8743E5A14F7 /* Themes */,
+				68BDD2CD1D6149BDBF8F7886 /* Licenses */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -340,6 +367,7 @@
 			isa = PBXGroup;
 			children = (
 				C1000020 /* GhosttyKit.xcframework */,
+				4E3912D5DBDC415CB3CF2D27 /* MoshClient.xcframework */,
 				9288A4E4FA9722C67B531048 /* iOS */,
 			);
 			path = Frameworks;
@@ -519,6 +547,7 @@
 				C0000009 /* Assets.xcassets in Resources */,
 				C0000022 /* rtach in Resources */,
 				80EDB74F6E178CE8B64DDA99 /* Themes in Resources */,
+				024CE38D33404DC69175B595 /* Licenses in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -576,9 +605,12 @@
 				7FFBEF967315C68C68D6248E /* WebTabView.swift in Sources */,
 				C0000024 /* NotificationManager.swift in Sources */,
 				C0000025 /* SettingsView.swift in Sources */,
+				E4CFB94A59B244ACA0E4577D /* LicensesView.swift in Sources */,
 				C0000028 /* PortsSheetView.swift in Sources */,
 				C0000026 /* PowerManager.swift in Sources */,
 				C0000027 /* SpeechManager.swift in Sources */,
+				946BC80298724BB8B509FC29 /* MoshClientSession.swift in Sources */,
+				16BEF38F492343C3B3FCC707 /* MoshBootstrap.swift in Sources */,
 				70A49F4997645686B962E0D2 /* SelectionHandleView.swift in Sources */,
 				570C2F179E1D3237D5566647 /* TabBubble.swift in Sources */,
 				3FA137DDC10174738807DD87 /* LiquidGlassTabBar.swift in Sources */,

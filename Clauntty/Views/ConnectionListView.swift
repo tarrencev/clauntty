@@ -235,9 +235,21 @@ struct ConnectionRow: View {
 
             Spacer()
 
-            Image(systemName: connection.authMethod == .password ? "key.fill" : "key.horizontal.fill")
-                .foregroundColor(.secondary)
-                .font(.caption)
+            HStack(spacing: 8) {
+                if connection.transport == .mosh {
+                    Text("Mosh")
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundColor(.orange)
+                        .clipShape(Capsule())
+                }
+
+                Image(systemName: connection.authMethod == .password ? "key.fill" : "key.horizontal.fill")
+                    .foregroundColor(.secondary)
+                    .font(.caption)
+            }
         }
         .padding(.vertical, 4)
     }

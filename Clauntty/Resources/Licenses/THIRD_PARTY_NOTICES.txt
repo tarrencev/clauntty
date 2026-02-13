@@ -1,0 +1,32 @@
+# Third-Party Notices
+
+Clauntty includes third-party software. This file lists key components and their licenses.
+
+## Mosh (mobile-shell/mosh)
+
+- Project: Mosh: the mobile shell
+- Source: https://github.com/mobile-shell/mosh
+- License: GNU GPLv3 (see `LICENSE` in this repo; upstream file: `ThirdParty/mosh/COPYING`)
+
+### iOS / App Store distribution note (upstream)
+
+From `ThirdParty/mosh/COPYING.iOS`:
+
+> The Mosh developers are aware that the terms of service that apply to
+> apps distributed via Apple's App Store services may conflict with
+> rights granted under Mosh's license, the GNU General Public License,
+> version 3. The Mosh copyright holders do not wish this conflict to
+> prevent the otherwise-compliant distribution of Mosh-derived apps via
+> the App Store. Therefore, we have committed not to pursue any license
+> violation that results solely from the conflict between the GPLv3 and
+> the Apple App Store terms of service. In other words, as long as you
+> comply with the GPL in all other respects, including its requirements
+> to provide users with source code and the text of the license, we will
+> not object to your distribution of Mosh through the App Store.
+
+## Protocol Buffers (protocolbuffers/protobuf)
+
+- Project: Protocol Buffers
+- Source: https://github.com/protocolbuffers/protobuf
+- License: BSD 3-Clause (upstream file: `ThirdParty/protobuf/LICENSE`)
+

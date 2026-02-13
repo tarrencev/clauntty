@@ -93,6 +93,16 @@ struct SettingsView: View {
                 } footer: {
                     Text("Get notified when a terminal is waiting for your input while the app is in the background.")
                 }
+
+                Section {
+                    NavigationLink {
+                        LicensesView()
+                    } label: {
+                        Text("Licenses")
+                    }
+                } header: {
+                    Text("Legal")
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

@@ -197,6 +197,9 @@ class Session: ObservableObject, Identifiable {
     /// This keeps the connection alive for the lifetime of the session
     var sshConnection: SSHConnection?
 
+    /// Mosh client session (for ConnectionTransport.mosh)
+    var moshClient: MoshClientSession?
+
     // MARK: - Terminal Size
 
     /// Initial terminal size to use when connecting (rows, columns)
@@ -263,6 +266,10 @@ class Session: ObservableObject, Identifiable {
 
     /// Maximum scrollback buffer size (50KB)
     private let maxScrollbackSize = 50 * 1024
+
+    /// Output received before a terminal surface is wired (`onDataReceived == nil`).
+    /// This is replayed once when a surface becomes ready to avoid dropping initial output.
+    private var pendingSurfaceOutput = Data()
 
     // MARK: - Callbacks
 
@@ -361,6 +368,8 @@ class Session: ObservableObject, Identifiable {
         // Disconnect our SSH connection
         sshConnection?.disconnect()
         sshConnection = nil
+        moshClient?.stop()
+        moshClient = nil
         sshChannel = nil
         channelHandler = nil
         parentConnection = nil
@@ -384,6 +393,19 @@ class Session: ObservableObject, Identifiable {
 
         // Delegate to RtachSession for protocol handling
         rtachProtocol.processIncomingData(data)
+    }
+
+    /// Handle terminal output that bypasses the SSH/rtach pipeline (e.g. embedded Mosh).
+    func handleDirectTerminalOutput(_ data: Data) {
+        processTerminalData(data)
+    }
+
+    /// Drain output received before the terminal surface was wired.
+    /// TerminalView calls this once when the surface becomes ready.
+    func drainPendingSurfaceOutput() -> Data {
+        let out = pendingSurfaceOutput
+        pendingSurfaceOutput.removeAll(keepingCapacity: false)
+        return out
     }
 
     /// Handle SSH channel becoming inactive (connection lost)
@@ -511,6 +533,15 @@ class Session: ObservableObject, Identifiable {
             scrollbackBuffer.removeFirst(excess)
         }
 
+        // If there's no wired surface yet, accumulate a one-time replay buffer.
+        if onDataReceived == nil {
+            pendingSurfaceOutput.append(data)
+            if pendingSurfaceOutput.count > maxScrollbackSize {
+                let excess = pendingSurfaceOutput.count - maxScrollbackSize
+                pendingSurfaceOutput.removeFirst(excess)
+            }
+        }
+
         // Forward to terminal
         onDataReceived?(data)
 
@@ -608,6 +639,11 @@ class Session: ObservableObject, Identifiable {
     /// Send data to remote (keyboard input)
     /// Uses rtach protocol to automatically frame when in framed mode
     func sendData(_ data: Data) {
+        if connectionConfig.transport == .mosh {
+            moshClient?.sendInput(data)
+            return
+        }
+
         Logger.clauntty.verbose("Session \(self.id.uuidString.prefix(8)): sendData called with \(data.count) bytes, channelHandler=\(self.channelHandler != nil ? "set" : "nil")")
         if channelHandler == nil {
             Logger.clauntty.error("Session \(self.id.uuidString.prefix(8)): sendData called but channelHandler is nil!")
@@ -627,6 +663,12 @@ class Session: ObservableObject, Identifiable {
     /// Send window size change
     func sendWindowChange(rows: UInt16, columns: UInt16) {
         Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange called \(columns)x\(rows)")
+
+        if connectionConfig.transport == .mosh {
+            moshClient?.sendResize(cols: Int(columns), rows: Int(rows))
+            return
+        }
+
         guard let channel = sshChannel else {
             // Expected during connection setup - size will be sent after channel is established
             Logger.clauntty.debugOnly("TAB_SWITCH: sendWindowChange SKIPPED (no channel)")
@@ -693,6 +735,18 @@ class Session: ObservableObject, Identifiable {
     /// Pause terminal output streaming (for inactive tabs/backgrounded app)
     /// rtach will buffer output locally and send idle notifications
     func pauseOutput() {
+        if connectionConfig.transport == .mosh {
+            guard !isPaused else {
+                Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pauseOutput skipped (already paused)")
+                return
+            }
+            isPaused = true
+            isPrefetchingOnIdle = false
+            moshClient?.setOutputEnabled(false)
+            Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): paused Mosh output")
+            return
+        }
+
         guard !isPaused else {
             Logger.clauntty.debugOnly("Session \(self.id.uuidString.prefix(8)): pauseOutput skipped (already paused)")
             return
@@ -726,6 +780,18 @@ class Session: ObservableObject, Identifiable {
         // Clear pending pause if we're resuming before framed mode
         pendingPause = false
 
+        if connectionConfig.transport == .mosh {
+            guard isPaused else {
+                Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SKIPPED (not paused)")
+                return
+            }
+            isPaused = false
+            isPrefetchingOnIdle = false
+            moshClient?.setOutputEnabled(true)
+            Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumed Mosh output")
+            return
+        }
+
         guard isPaused else {
             Logger.clauntty.debugOnly("TAB_SWITCH[\(self.id.uuidString.prefix(8))]: resumeOutput SKIPPED (not paused)")
             return
@@ -745,6 +811,9 @@ class Session: ObservableObject, Identifiable {
 
     /// Claim active client for window size and command routing
     func claimActive() {
+        if connectionConfig.transport == .mosh {
+            return
+        }
         guard rtachSessionId != nil else { return }
         guard rtachProtocol.isFramedMode else {
             pendingActiveClaim = true

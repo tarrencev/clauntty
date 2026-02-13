@@ -1,0 +1,5 @@
+module MoshClient {
+  header "clauntty_mosh.h"
+  export *
+}
+

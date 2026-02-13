@@ -127,6 +127,9 @@ class SessionManager: ObservableObject {
     /// Connect SSH and list existing rtach sessions
     /// Returns sessions and deployer, or nil if rtach is disabled or deployment fails
     func connectAndListSessions(for config: SavedConnection) async throws -> (sessions: [RtachSession], deployer: RtachDeployer)? {
+        // Mosh does not support server-side rtach session listing/sync.
+        guard config.transport == .ssh else { return nil }
+
         let poolKey = connectionKey(for: config)
 
         // Get or create SSH connection
@@ -174,6 +177,95 @@ class SessionManager: ObservableObject {
 
         let config = session.connectionConfig
         let poolKey = connectionKey(for: config)
+
+        if config.transport == .mosh {
+            let bootstrapConnection = SSHConnection(
+                host: config.host,
+                port: config.port,
+                username: config.username,
+                authMethod: config.authMethod,
+                connectionId: config.id
+            )
+            do {
+                try await bootstrapConnection.connect()
+                // Mosh expects a numeric IP (to preserve roaming semantics).
+                // Use the actual remote address of the SSH TCP connection as our best source of truth.
+                guard let ip = bootstrapConnection.remoteIPAddress() else {
+                    bootstrapConnection.disconnect()
+                    session.state = .error("Could not determine remote IP address for Mosh connection")
+                    return
+                }
+                let result = try await MoshBootstrap.startNewSession(connection: bootstrapConnection)
+                bootstrapConnection.disconnect()
+
+                // Stop any previous Mosh client.
+                session.moshClient?.stop()
+                session.moshClient = nil
+
+                let cols = session.initialTerminalSize.columns
+                let rows = session.initialTerminalSize.rows
+
+                let mosh = try MoshClientSession(
+                    ip: ip,
+                    port: String(result.udpPort),
+                    key: result.key,
+                    cols: cols,
+                    rows: rows,
+                    onOutput: { [weak session] data in
+                        session?.handleDirectTerminalOutput(data)
+                    },
+                    onEvent: { [weak session] event, message in
+                        guard let session else { return }
+                        switch event {
+                        case CLAUNTTY_MOSH_EVENT_CONNECTED:
+                            session.state = .connected
+                        case CLAUNTTY_MOSH_EVENT_NETWORK_ERROR:
+                            Logger.clauntty.warning("Mosh network error: \(message ?? "unknown")")
+                        case CLAUNTTY_MOSH_EVENT_CRYPTO_ERROR:
+                            session.state = .error(message ?? "Mosh crypto error")
+                        case CLAUNTTY_MOSH_EVENT_EXIT:
+                            Logger.clauntty.debugOnly("Mosh client exited: \(message ?? "nil")")
+                            if session.state != .disconnected {
+                                if let message, !message.isEmpty {
+                                    session.state = .error(message)
+                                } else {
+                                    session.state = .disconnected
+                                }
+                            }
+                        default:
+                            break
+                        }
+                    }
+                )
+
+                session.moshClient = mosh
+                if session.isPaused {
+                    mosh.setOutputEnabled(false)
+                }
+                // Stay in .connecting until the client reports connected.
+                mosh.start()
+
+                // Request notification permission on first session connect.
+                await NotificationManager.shared.requestAuthorizationIfNeeded()
+
+                // If UDP is blocked, Mosh may never transition to "connected".
+                // Fail fast with a helpful message instead of spinning forever.
+                let connectSessionId = session.id
+                Task { @MainActor [weak session] in
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    guard let session, session.id == connectSessionId else { return }
+                    guard session.connectionConfig.transport == .mosh else { return }
+                    if session.state == .connecting {
+                        session.moshClient?.stop()
+                        session.state = .error("Mosh connection timed out. Check that `mosh-server` is installed and UDP is allowed to the server.")
+                    }
+                }
+            } catch {
+                bootstrapConnection.disconnect()
+                session.state = .error(error.localizedDescription)
+            }
+            return
+        }
 
         // Create a fresh SSH connection for the terminal session
         // (The connection from connectAndListSessions may be in a bad state after exec commands)
@@ -292,6 +384,12 @@ class SessionManager: ObservableObject {
     func reconnect(session: Session) async throws {
         guard session.state == .disconnected else {
             Logger.clauntty.debugOnly("SessionManager: session \(session.id.uuidString.prefix(8)) not disconnected, skipping reconnect")
+            return
+        }
+
+        if session.connectionConfig.transport == .mosh {
+            Logger.clauntty.debugOnly("SessionManager: reconnecting mosh session \(session.id.uuidString.prefix(8))")
+            try await connect(session: session, rtachSessionId: nil)
             return
         }
 
@@ -1129,11 +1227,14 @@ class SessionManager: ObservableObject {
         var tabs: [PersistedTab] = []
 
         for (index, session) in sessions.enumerated() {
-            guard let rtachId = session.rtachSessionId else { continue }
+            // For SSH+rtach, persist the rtach session id.
+            // For other transports (e.g. Mosh), we still persist the tab, but without rtach id.
+            let rtachId = session.rtachSessionId
 
             let tab = PersistedTab(
                 id: session.id,
                 connectionId: session.connectionConfig.id,
+                transport: session.connectionConfig.transport,
                 rtachSessionId: rtachId,
                 createdAt: session.createdAt,
                 lastActiveAt: Date(),

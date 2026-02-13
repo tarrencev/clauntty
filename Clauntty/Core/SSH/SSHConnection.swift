@@ -411,6 +411,31 @@ class SSHConnection: ObservableObject {
         return platform
     }
 
+    /// Best-effort remote IP address of the SSH TCP connection.
+    ///
+    /// Mosh wants a numeric IP for roaming semantics; using the exact IP we connected to
+    /// avoids DNS ambiguities (and matches mosh's normal wrapper behavior).
+    func remoteIPAddress() -> String? {
+        guard let addr = channel?.remoteAddress else { return nil }
+        let desc = String(describing: addr)
+
+        // Common formats:
+        // - "127.0.0.1:22"
+        // - "[::1]:22"
+        // - "unix:/path" (not usable for Mosh)
+        if desc.hasPrefix("unix:") {
+            return nil
+        }
+        if desc.hasPrefix("["), let end = desc.firstIndex(of: "]") {
+            let start = desc.index(after: desc.startIndex)
+            return String(desc[start..<end])
+        }
+        if let lastColon = desc.lastIndex(of: ":") {
+            return String(desc[..<lastColon])
+        }
+        return desc.isEmpty ? nil : desc
+    }
+
     /// Send terminal window size change to SSH server
     func sendWindowChange(rows: UInt16, columns: UInt16) {
         guard let childChannel = sshChildChannel else {
